@@ -1,0 +1,13 @@
+{
+  "name": "atlas-kit",
+  "owner": {
+    "name": "MakeNative"
+  },
+  "plugins": [
+    {
+      "name": "atlas",
+      "source": ".",
+      "description": "Zeigt, was in einem Claude-Code-Kit oder Projekt steckt: /atlas:init liest ein, leitet die Abläufe ab und baut die Seite; einzeln gibt es /atlas:scan, /atlas:analyse und /atlas:render."
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+#!/bin/sh
+MINDEST_MAJOR=3
+MINDEST_MINOR=9
+MINDEST="$MINDEST_MAJOR.$MINDEST_MINOR"
+
+case "$0" in
+  */*) bin_ordner=${0%/*} ;;
+  *) bin_ordner=. ;;
+esac
+wurzel="$bin_ordner/.."
+
+melde_python() {
+  echo "atlas-kit braucht Python $MINDEST oder neuer, gefunden wurde $1. Installier es von https://www.python.org/downloads/ und ruf den Befehl danach noch einmal auf."
+  exit 1
+}
+
+py=""
+for kandidat in python3 python; do
+  if command -v "$kandidat" >/dev/null 2>&1; then
+    py=$kandidat
+    break
+  fi
+done
+[ -n "$py" ] || melde_python "keins"
+
+version=$("$py" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+major=${version%%.*}
+minor=${version#*.}
+case "$major.$minor" in
+  *[!0-9.]*|.*|*.) melde_python "keins" ;;
+esac
+if [ "$major" -lt "$MINDEST_MAJOR" ] || { [ "$major" -eq "$MINDEST_MAJOR" ] && [ "$minor" -lt "$MINDEST_MINOR" ]; }; then
+  melde_python "Python $version"
+fi
+
+exec "$py" -B -E -s "$wurzel/befehle/atlas_kit.py" "$@"

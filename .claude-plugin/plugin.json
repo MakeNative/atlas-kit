@@ -1,0 +1,9 @@
+{
+  "name": "atlas",
+  "description": "Macht aus einem Claude-Code-Kit oder einem Projekt mit eigenen Skills und Agenten eine Seite, die zeigt, welche Skills und Agenten es hat und wie seine Abläufe laufen. /atlas:init erledigt alles in einem Rutsch: einlesen, Abläufe ableiten, Seite bauen und öffnen. Einzeln liest /atlas:scan ein, leitet /atlas:analyse die Abläufe aus den Beschreibungen ab und baut /atlas:render die Seite als eine Datei. Kit und Projekt werden nur gelesen.",
+  "version": "0.2.0",
+  "author": {
+    "name": "ceichmueller"
+  },
+  "license": "MIT"
+}
