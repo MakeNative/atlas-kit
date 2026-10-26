@@ -6,16 +6,14 @@ import re
 from dataclasses import dataclass
 
 from befunde import Befunde
+from vokabular import AUSFUEHRENDE, MENSCH, WERKZEUG_PFAD
 from yaml_lesen import Frontmatter, ganzzahl_feld, listen_feld, pfad_text, text_feld
 
 PROSA_FETT = re.compile(r"^\s*(\d+)\. \*\*")
 PROSA_SCHLICHT = re.compile(r"^\s*(\d+)\. \S")
 ZAUN = re.compile(r"^\s*```")
-MENSCH = ("rueckfrage", "freigabe", "abnahme")
 SCHRITT_SCHLUESSEL = ("id", "titel", "mensch", "agent", "parallel", "werkzeug", "skill", "bei_befund")
-AUSFUEHRENDE = ("agent", "parallel", "werkzeug", "skill")
 BEI_BEFUND_SCHLUESSEL = ("zurueck", "max")
-WERKZEUG_PFAD = re.compile(r"^tools/([^/]+)\.py$")
 
 
 @dataclass
@@ -66,6 +64,10 @@ class _Schritt:
 
 # ---------------------------------------------------------------- Schritte lesen
 
+def _id_oder_none(roh: dict) -> str | None:
+    return roh["id"] if isinstance(roh.get("id"), str) else None
+
+
 def _lies_bei_befund(fm: Frontmatter, basis: tuple, s: _Schritt, befunde: Befunde) -> None:
     """bei_befund eines Schritts: zurueck (SC-E3) und max (SC-E5)."""
     pfad = basis + ("bei_befund",)
@@ -75,21 +77,21 @@ def _lies_bei_befund(fm: Frontmatter, basis: tuple, s: _Schritt, befunde: Befund
     if not isinstance(bb, dict):
         befunde.melde("nicht_unterstuetzt",
                       f"{pfad_text(pfad)}: erwartet eine Abbildung mit zurueck und max",
-                      fm.datei, fm.zeile(*pfad))
+                      fm.datei, fm.zeile(*pfad), schritt=s.id, aussage="bei_befund")
         return
     for schluessel in bb:
         if schluessel not in BEI_BEFUND_SCHLUESSEL:
             befunde.melde("nicht_unterstuetzt",
                           f"Unbekannter Schlüssel {schluessel} in {pfad_text(pfad)}; "
                           f"erlaubt sind zurueck, max",
-                          fm.datei, fm.zeile(*pfad, schluessel))
+                          fm.datei, fm.zeile(*pfad, schluessel), schritt=s.id, aussage=f"bei_befund.{schluessel}")
     if fm.hat(*pfad, "zurueck"):
         s.zurueck = text_feld(fm, pfad + ("zurueck",), befunde)
     else:
         befunde.melde("pflichtfeld_fehlt",
                       f"{pfad_text(pfad)} von Schritt {s.id or s.pos + 1} hat kein "
                       f"Pflichtfeld zurueck; keine zurueck-Kante",
-                      fm.datei, fm.zeile(*pfad))
+                      fm.datei, fm.zeile(*pfad), schritt=s.id, aussage="zurueck")
     s.max = ganzzahl_feld(fm, pfad + ("max",), befunde, minimum=1,
                           folge="die Kante bekommt kein max")
 
@@ -102,7 +104,8 @@ def _lies_schritt(fm: Frontmatter, i: int, befunde: Befunde) -> tuple[_Schritt, 
     ort = f"Schritt {i + 1} in atlas.schritte"
     if not isinstance(roh, dict):
         befunde.melde("nicht_unterstuetzt",
-                      f"{ort} ist keine Abbildung mit id und titel", fm.datei, fm.zeile(*basis))
+                      f"{ort} ist keine Abbildung mit id und titel", fm.datei, fm.zeile(*basis),
+                      aussage="schritt")
         return s, False
     for schluessel in roh:
         if schluessel not in SCHRITT_SCHLUESSEL:
@@ -110,12 +113,13 @@ def _lies_schritt(fm: Frontmatter, i: int, befunde: Befunde) -> tuple[_Schritt, 
                           f"Unbekannter Schlüssel {schluessel} in {ort} "
                           f"({pfad_text(basis + (schluessel,))}); erlaubt sind "
                           f"{', '.join(SCHRITT_SCHLUESSEL)}",
-                          fm.datei, fm.zeile(*basis, schluessel))
+                          fm.datei, fm.zeile(*basis, schluessel), schritt=_id_oder_none(roh),
+                          aussage=f"schritt.{schluessel}")
     gut = True
     for feld in ("id", "titel"):
         if not fm.hat(*basis, feld):
             befunde.melde("pflichtfeld_fehlt", f"{ort} hat kein Pflichtfeld {feld}",
-                          fm.datei, fm.zeile(*basis))
+                          fm.datei, fm.zeile(*basis), schritt=_id_oder_none(roh), aussage=feld)
             gut = False
     s.id = text_feld(fm, basis + ("id",), befunde)
     if s.id is None:
@@ -129,7 +133,7 @@ def _lies_schritt(fm: Frontmatter, i: int, befunde: Befunde) -> tuple[_Schritt, 
         befunde.melde("widerspruch",
                       f"{ort}: mensch '{mensch}' ist nicht erlaubt ({' | '.join(MENSCH)}); "
                       f"mensch wird null",
-                      fm.datei, fm.zeile(*basis, "mensch"))
+                      fm.datei, fm.zeile(*basis, "mensch"), schritt=s.id, aussage="mensch")
 
     s.agent = text_feld(fm, basis + ("agent",), befunde)
     s.parallel = listen_feld(fm, basis + ("parallel",), befunde)
@@ -140,7 +144,7 @@ def _lies_schritt(fm: Frontmatter, i: int, befunde: Befunde) -> tuple[_Schritt, 
         befunde.melde("widerspruch",
                       f"Schritt {s.id or i + 1} nennt mehr als einen Ausführenden "
                       f"({', '.join(genannt)})",
-                      fm.datei, fm.zeile(*basis))
+                      fm.datei, fm.zeile(*basis), schritt=s.id, aussage="startziele")
     _lies_bei_befund(fm, basis, s, befunde)
     return s, gut
 
@@ -156,7 +160,7 @@ def _ids_eindeutig(schritte: list[_Schritt], fm: Frontmatter, befunde: Befunde) 
             befunde.melde("widerspruch",
                           f"Die Schritt-id {s.id} steht in atlas.schritte doppelt "
                           f"(Schritt {gesehen[s.id] + 1} und {s.pos + 1})",
-                          fm.datei, fm.zeile("atlas", "schritte", s.pos))
+                          fm.datei, fm.zeile("atlas", "schritte", s.pos), schritt=s.id, aussage="id")
             eindeutig = False
         else:
             gesehen[s.id] = s.pos
@@ -176,13 +180,13 @@ def _passt_zur_prosa(prosa: list[ProsaSchritt], anzahl: int, fm: Frontmatter,
                           f"Schritt {p.nr} in Zeile {p.zeile} "
                           f"{'steht am Anfang' if vorher is None else f'folgt auf {vorher}'} "
                           f"(Folge {folge})",
-                          fm.datei, p.zeile)
+                          fm.datei, p.zeile, aussage="prosa")
             gut = False
             break
     if anzahl != len(prosa):
         befunde.melde("widerspruch",
                       f"atlas.schritte nennt {anzahl} Schritte, die Prosa {len(prosa)}",
-                      fm.datei, fm.zeile("atlas", "schritte"))
+                      fm.datei, fm.zeile("atlas", "schritte"), aussage="anzahl")
         gut = False
     return gut
 
@@ -197,14 +201,14 @@ def _lies_schritte(fm: Frontmatter, befunde: Befunde) -> tuple[list[_Schritt], b
         return None             # skills.py hat den Befund zum atlas-Feld schon gemeldet
     if not fm.hat("atlas", "schritte"):
         befunde.melde("pflichtfeld_fehlt", "Im atlas-Feld fehlt das Pflichtfeld schritte",
-                      fm.datei, fm.zeile("atlas"))
+                      fm.datei, fm.zeile("atlas"), aussage="atlas.schritte")
         return None
     roh = fm.hole("atlas", "schritte")
     if not isinstance(roh, list) or not roh:
         befunde.melde("nicht_unterstuetzt",
                       f"atlas.schritte: erwartet eine nicht leere Liste, gefunden "
                       f"{'eine leere Liste' if roh == [] else repr(roh)}; keine Schritte",
-                      fm.datei, fm.zeile("atlas", "schritte"))
+                      fm.datei, fm.zeile("atlas", "schritte"), aussage="atlas.schritte")
         return None
     schritte = []
     gut = True
@@ -229,10 +233,10 @@ def _kante(von: str, nach: str, typ: str, beleg: dict, **extra) -> dict:
 
 
 def _verweis_fehlt(befunde: Befunde, datei: str, s: _Schritt, p: ProsaSchritt,
-                   was: str, wert: str) -> None:
+                   was: str, wert: str, aussage: str, ziel_art: str) -> None:
     """SC-E2: Befund mit Datei und Zeile des Prosa-Schritts."""
     befunde.melde("verweis_fehlt", f"Schritt {s.id}: {was} {wert} gibt es im Kit nicht; keine Kante",
-                  datei, p.zeile)
+                  datei, p.zeile, schritt=s.id, aussage=aussage, ziel_art=ziel_art, ziel=wert)
 
 
 def _schritt_knoten(skill: dict, schritte: list[_Schritt], prosa: list[ProsaSchritt],
@@ -264,32 +268,33 @@ def _kanten_eines_schritts(n: int, schritte: list[_Schritt], prosa: list[ProsaSc
         m = WERKZEUG_PFAD.match(posixpath.normpath(s.werkzeug))
         werkzeug_ziel = f"werkzeug:{m.group(1)}" if m else None
     startet = [
-        (s.agent, f"agent:{s.agent}", "der Agent"),
-        (s.werkzeug, werkzeug_ziel, "das Werkzeug (Datei direkt unter tools/)"),
-        (s.skill, f"skill:{s.skill}", "die Skill"),
+        (s.agent, f"agent:{s.agent}", "der Agent", "agent"),
+        (s.werkzeug, werkzeug_ziel, "das Werkzeug (Datei direkt unter tools/)", "werkzeug"),
+        (s.skill, f"skill:{s.skill}", "die Skill", "skill"),
     ]
-    for wert, ziel, was in startet:
+    for wert, ziel, was, art in startet:
         if wert is None:
             continue
         if ziel in knoten_ids:
             kanten.append(_kante(von, ziel, "startet", beleg))
         else:
-            _verweis_fehlt(befunde, datei, s, p, was, wert)
+            _verweis_fehlt(befunde, datei, s, p, was, wert, art, art)
     for agent in s.parallel or []:
         if f"agent:{agent}" in knoten_ids:
             kanten.append(_kante(von, f"agent:{agent}", "parallel", beleg))
         else:
-            _verweis_fehlt(befunde, datei, s, p, "der Agent", agent)
+            _verweis_fehlt(befunde, datei, s, p, "der Agent", agent, "parallel", "agent")
 
     if s.zurueck is not None:
         ziel = next((t for t in schritte if t.id == s.zurueck), None)
         if ziel is None:
-            _verweis_fehlt(befunde, datei, s, p, "der Schritt", s.zurueck)
+            _verweis_fehlt(befunde, datei, s, p, "der Schritt", s.zurueck, "zurueck", "schritt")
         elif ziel.pos >= s.pos:
             befunde.melde("widerspruch",
                           f"Schritt {s.id}: bei_befund.zurueck zeigt auf {s.zurueck}, "
                           f"denselben oder einen späteren Schritt; keine Kante",
-                          datei, fm.zeile("atlas", "schritte", s.pos, "bei_befund", "zurueck"))
+                          datei, fm.zeile("atlas", "schritte", s.pos, "bei_befund", "zurueck"), schritt=s.id,
+                          aussage="zurueck", ziel_art="schritt", ziel=s.zurueck)
         else:
             extra = {"max": s.max} if s.max is not None else {}
             kanten.append(_kante(von, sid[s.zurueck], "zurueck", beleg, **extra))
@@ -299,6 +304,7 @@ def _kanten_eines_schritts(n: int, schritte: list[_Schritt], prosa: list[ProsaSc
 def schritte_und_kanten(skill: dict, fm: Frontmatter, knoten_ids: set[str],
                         befunde: Befunde) -> tuple[list[dict], list[dict]]:
     """Schritt-Knoten und Schritt-Kanten einer Skill. Bei Widerspruch (SC-P6) beide leer."""
+    befunde = befunde.mit_skill(skill["name"])
     gelesen = _lies_schritte(fm, befunde)
     if gelesen is None:
         return [], []

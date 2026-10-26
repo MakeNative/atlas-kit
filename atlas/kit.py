@@ -65,7 +65,7 @@ def lies_kit(ordner: Ordner, befunde: Befunde) -> dict:
     if not datei.is_file():
         raise KitFehler(f"{PLUGIN_JSON} fehlt in {kit}")
     try:
-        daten = json.loads(datei.read_text(encoding="utf-8"))
+        daten = json.loads(datei.read_text(encoding="utf-8-sig"))
     except UnicodeDecodeError:
         raise KitFehler(f"{PLUGIN_JSON} ist nicht als UTF-8 lesbar")
     except json.JSONDecodeError as e:
@@ -75,17 +75,18 @@ def lies_kit(ordner: Ordner, befunde: Befunde) -> dict:
 
     version = daten.get("version")
     if version is None:
-        befunde.melde("pflichtfeld_fehlt", f"{PLUGIN_JSON} hat kein Feld version", PLUGIN_JSON, None)
+        befunde.melde("pflichtfeld_fehlt", f"{PLUGIN_JSON} hat kein Feld version", PLUGIN_JSON, None,
+                      aussage="version")
     elif not isinstance(version, str):
         befunde.melde("nicht_unterstuetzt",
                       f"{PLUGIN_JSON}: version ist kein Text ({version!r}); wird nicht übernommen",
-                      PLUGIN_JSON, None)
+                      PLUGIN_JSON, None, aussage="version")
         version = None
     beschreibung = daten.get("description")
     if beschreibung is not None and not isinstance(beschreibung, str):
         befunde.melde("nicht_unterstuetzt",
                       f"{PLUGIN_JSON}: description ist kein Text; wird nicht übernommen",
-                      PLUGIN_JSON, None)
+                      PLUGIN_JSON, None, aussage="description")
         beschreibung = None
 
     return {

@@ -1,6 +1,8 @@
 # atlas-kit
 
-atlas-kit macht aus einem Claude-Code-Kit (einem Plugin mit Skills und Agenten, also einem Ordner mit `.claude-plugin/plugin.json`) oder aus einem Projekt, in dem Claude eigene Skills oder Agenten unter `.claude/` hat, eine Seite. Sie zeigt, welche Skills und Agenten es gibt und wie ihre Abläufe laufen. Das klappt für deine eigenen Kits und Projekte und für jedes andere Kit, das du installiert oder als Ordner vorliegen hast. Hat ein Kit keine eigenen Angaben zu seinen Abläufen, liest Claude sie aus den Beschreibungen heraus, jeden Schritt mit seiner Belegzeile. Das Kit oder Projekt wird dabei nur gelesen, nie verändert.
+atlas-kit macht aus einem Claude-Code-Kit (einem Plugin mit Skills und Agenten, also einem Ordner mit `.claude-plugin/plugin.json`) oder aus einem Projekt, in dem Claude eigene Skills oder Agenten unter `.claude/` hat, eine Seite. Sie zeigt, welche Skills und Agenten es gibt und wie ihre Abläufe laufen. Das klappt für deine eigenen Kits und Projekte und für jedes andere Kit, das du installiert oder als Ordner vorliegen hast. Hat ein Kit keine eigenen Angaben zu seinen Abläufen, liest Claude sie aus den Beschreibungen heraus, jeden Schritt mit seiner Belegzeile. Das Kit oder Projekt wird dabei nur gelesen.
+
+In der Werkstatt (`/atlas:werkstatt`) bearbeitest du deine Pipelines auf derselben Seite: Agenten und Schritte von Hand oder mit KI ändern, eine Pipeline von der KI bewerten lassen und neue Pipelines anlegen. Geschrieben wird dort nur, was du in der Vorschau übernimmst, mit Sicherung und Rückgängig.
 
 ![Die Seite von folien-kit: links die Skills, oben der Ablauf der Skill deck, darunter die Agenten nach Planer, Umsetzer und Prüfer](bild/folien-kit.png)
 
@@ -13,11 +15,20 @@ atlas-kit macht aus einem Claude-Code-Kit (einem Plugin mit Skills und Agenten, 
 
 Mehr musst du nicht einrichten. Du brauchst Claude Code und Python 3.9 oder neuer. Beim ersten Aufruf richtet atlas-kit sein Hilfsprogramm zum Lesen ein: eine eigene Python-Umgebung mit PyYAML im Datenordner, den Claude Code dem Plugin gibt, nichts ins System-Python. Das dauert etwa eine Minute und braucht einmal Internet, danach nicht mehr. An deinem System ändert es nichts.
 
-atlas-kit ist getestet auf macOS. Linux und Windows sollten gehen, sind aber noch nicht ausprobiert.
+atlas-kit ist getestet auf macOS; unter Windows läuft es in einer automatischen Prüfung, von Hand ausprobiert ist es dort noch nicht. Linux sollte gehen, ist aber noch nicht ausprobiert. Für Windows steht unten, was du brauchst.
+
+### Unter Windows
+
+Unter Windows läuft atlas-kit in Claude Code für Windows. Die Befehle von atlas-kit laufen dort in Git Bash, der Shell aus Git for Windows; installier Git for Windows also, falls Claude Code es nicht schon verlangt hat. Dazu brauchst du:
+
+- Python 3.9 oder neuer von https://www.python.org/downloads/. Setz beim Installieren das Häkchen „Add python.exe to PATH“. Ohne das Häkchen findet atlas-kit Python über den Starter `py`, den das Installationsprogramm mitbringt.
+- Das „python“ aus dem Microsoft Store, das Windows ohne installiertes Python anbietet, ist nur ein Platzhalter. atlas-kit überspringt ihn und sagt dir, wenn es kein passendes Python findet.
+
+Die Werkstatt öffnet sich im Standardbrowser, den du in den Windows-Einstellungen unter „Standard-Apps“ gewählt hast. Dateien mit Windows-Zeilenenden (CRLF), wie Git for Windows sie meist auscheckt, bleiben beim Bearbeiten so, wie sie sind; „Speichern“ committet sie wie gewohnt. Unter Windows prüft eine automatische Testreihe atlas-kit bei jeder Änderung, von Hand ausprobiert ist es dort noch nicht.
 
 ## Benutzung
 
-Am einfachsten ist `/atlas:init`: einlesen, Abläufe ableiten, Seite bauen und öffnen, alles in einem Rutsch. Daneben gibt es drei einzelne Befehle für die Teilschritte: `/atlas:scan`, `/atlas:analyse` und `/atlas:render`. Alle vier nehmen dieselbe Angabe, welches Kit oder Projekt gemeint ist:
+Am einfachsten ist `/atlas:init`: einlesen, Abläufe ableiten, Seite bauen und öffnen, alles in einem Rutsch. Daneben gibt es drei einzelne Befehle für die Teilschritte: `/atlas:scan`, `/atlas:analyse` und `/atlas:render`. Zum Bearbeiten öffnet `/atlas:werkstatt` die Seite in der Werkstatt, ein neues Kit legt `/atlas:neu` an. Die fünf außer `/atlas:neu` nehmen dieselbe Angabe, welches Kit oder Projekt gemeint ist:
 
 - Ohne Angabe nimmt atlas-kit das Kit oder Projekt in dem Ordner, in dem du gerade arbeitest.
 - Mit einem Ordner nimmt es das Kit oder Projekt dort, zum Beispiel `/atlas:init ~/mein-kit`.
@@ -105,11 +116,190 @@ Seite gebaut: /pfad/zu/deinem-projekt/atlas-kit/folien-kit.html
 Im Browser geöffnet.
 ```
 
+Ein Klick auf einen Agenten öffnet sein Blatt mit Rolle, Rechten und den Abläufen, in denen er steckt. Darin klappt „Prompt“ seinen Text auf, gegliedert in Kopf, Auftrag, Lesen, Regeln, Schritte und Fertig: der Kopf als Tabelle, jeder Teil mit seinem Originaltext, ganz unten der rohe Text. Erkannt werden die Teile nur an ihren Überschriften, deutsch oder englisch (`## Regeln`, `## Rules` …); andere Abschnitte stehen unter ihrem eigenen Namen dazwischen. Fehlt ein Teil, steht dort ein ruhiger Hinweis. Gibt es keinen Abschnitt Fertig, aber Schritte, nennt die Seite den letzten Schritt als vermutliche Stelle, mit Zeile.
+
 Hast du das Kit vorher nicht eingelesen, liest `/atlas:render` es selbst zuerst ein und nimmt dabei vorhandene abgeleitete Abläufe mit. Hast du das Kit seit dem letzten Einlesen geändert, ruf vorher `/atlas:scan` auf. Öffnet sich der Browser nicht von selbst, öffnest du die Datei per Doppelklick.
+
+### `/atlas:werkstatt` öffnet die Seite zum Bearbeiten
+
+```
+/atlas:werkstatt
+/atlas:werkstatt ~/mein-kit
+/atlas:werkstatt mein-kit
+/atlas:werkstatt stopp
+/atlas:werkstatt stopp --alle
+/atlas:werkstatt knopf
+```
+
+In der Werkstatt änderst du ein Kit oder Projekt direkt auf seiner Seite: Agenten anlegen, anpassen und löschen, Schritte einfügen, ändern und entfernen, Schleifen setzen, eine Pipeline bewerten lassen und neue Pipelines anlegen. Jedes davon geht von Hand oder mit KI. Geschrieben wird erst, wenn du die Vorschau übernimmst.
+
+![Die Werkstatt mit folien-kit: oben die Leiste mit Ansehen und Bearbeiten, Rückgängig, Speichern und Mit KI, im Ablauf deck ein neu eingefügter Mensch-Schritt Freigabe, unten die Leiste mit einer vorgemerkten Änderung](bild/werkstatt.png)
+
+Die Werkstatt startet auf deinem Rechner einen kleinen Server, und der öffnet die Seite selbst im Browser, mit einer Leiste oben. Im Chat steht:
+
+```text
+Werkstatt für mein-kit läuft.
+Im Browser geöffnet.
+```
+
+Öffnet sich kein Browser (etwa über SSH), nennt die Werkstatt im Chat eine Datei, in der der Link steht; öffne ihn selbst im Browser. Er gilt einmal und zehn Minuten, `/atlas:werkstatt oeffnen` macht einen neuen. Die Sitzung in Claude Code bleibt danach offen und wartet auf Aufträge aus der Seite (siehe „Wie die KI arbeitet“). Beenden kannst du mit „Werkstatt beenden“ in der Leiste oder mit `/atlas:werkstatt stopp` (beendet die Werkstatt des Kits im Arbeitsordner, `stopp ~/mein-kit` die eines anderen; alle laufenden Werkstätten beendet `/atlas:werkstatt stopp --alle`); sonst endet der Server nach zwei Stunden ohne Nutzung.
+
+Oben in der Leiste wechselst du zwischen „Ansehen“ (die Seite wie aus `/atlas:render`) und „Bearbeiten“. Ein installiertes Kit öffnet die Werkstatt nur zum Lesen; zum Bearbeiten öffnest du den Ordner, aus dem du das Kit entwickelst, etwa mit `/atlas:werkstatt ~/mein-kit`. Änderst du Dateien des Kits nebenher von Hand, zeichnet sich die Seite neu, und die gewählte Skill bleibt.
+
+#### Wie eine Änderung ins Kit kommt
+
+Jede Änderung, ob von Hand oder von der KI, ist ein Änderungssatz: eine Liste einzelner Schritte wie „Agent anlegen“, „Schritt einfügen“ oder „Schleife setzen“. Bevor etwas geschrieben wird, zeigt die Änderungsvorschau jeden Eintrag mit seinen Dateien als Diff, und das Ablaufbild zeigt das Ergebnis: neue und geänderte Schritte sind markiert, wegfallende stehen gestrichelt und durchgestrichen da. Du hakst an, was du willst, und übernimmst.
+
+Ein Ablauf auf der Seite ist ein Bild des Texts der Skill, den Claude ausführt. Darum ändern sich die Atlas-Angaben und dieser Text immer zusammen, und die Pipeline läuft danach so, wie das Bild sie zeigt. Geschrieben wird so wenig wie möglich: Zeilen, die eine Änderung nicht betrifft, bleiben genau wie sie waren. Ergäbe eine Änderung neue Hinweise zum Bauplan, schreibt die Werkstatt sie gar nicht erst und sagt dir, was nicht gepasst hätte; geprüft wird vorher in einer Kopie.
+
+#### Von Hand bearbeiten
+
+- **Am Ablauf:** Klick auf einen Kasten öffnet ein Menü mit „Davor einfügen“, „Danach einfügen“, „Schritt ändern“, „Agent … ändern“, „Schleife setzen“ und „Entfernen“. Fährst du mit der Maus über einen Pfeil, steht in seiner Vorschau „+ Schritt oder Agent hinzufügen“. Beim Einfügen wählst du einen vorhandenen Agenten, einen neuen, einen Mensch-Schritt (Freigabe, Rückfrage, Abnahme) oder einen Schritt ohne Agent, gibst ihm einen Titel und schreibst unter „Was soll der Schritt tun?“, was Claude an dieser Stelle tun soll. Das wird der Text in der Skill.
+- **Schleife:** „Schleife setzen“ am Kasten, dann Klick auf den früheren Schritt, zu dem es bei Befund zurückgeht, dazu höchstens wie viele Runden.
+- **Agenten:** Klick auf einen Agenten auf dem Board öffnet „Ändern“ und „Löschen …“, „+ Agent“ in jeder Rollengruppe legt einen neuen an. Im Formular stehen Name, Beschreibung, Rolle, Rechte (Werkzeuge), Modell und der Prompt Teil für Teil: je Teil ein Textfeld unter seiner Überschrift, und für einen fehlenden Teil ein Knopf wie „+ Lesen ergänzen“, der ihn an der richtigen Stelle mit passender Überschrift einsetzt. Ein neuer Agent hat ein Feld für den ganzen Anweisungstext. Umbenennen ändert auch alle Nennungen in den Skills. Steckt ein Agent, den du löschen willst, in Abläufen, zeigt die Werkstatt vorher, welche Schritte mit wegfallen.
+
+Handänderungen sammeln sich, bevor etwas geschrieben wird. Unten steht dann „3 Änderungen vorgemerkt · noch nichts geschrieben“ mit „Vorschau und übernehmen“ und „Verwerfen“. Verwerfen fragt vorher nach; „Behalten“ lässt alles stehen. Vorgemerktes lebt nur in der Seite: Lädst du sie neu, ist es weg.
+
+Hat eine Skill einen abgeleiteten Ablauf, also einen ohne eigene Atlas-Angaben, bekommt ein von Hand eingefügter Schritt im Text der Skill einen eigenen, klar erkennbaren Abschnitt. Sauber in den Stil der Skill einarbeiten und unklar abgegrenzte Schritte entfernen kann nur die KI.
+
+#### Mit KI ändern
+
+„Mit KI“ in der Leiste öffnet ein Feld, in dem du in Worten beschreibst, was anders werden soll, zum Beispiel „Ändere die Beschreibung von planer“. Dasselbe Feld öffnet „Mit KI ändern“ am Kasten eines Schritts, am Agenten auf dem Board, im Agent-Formular und über dem Ablauf; dann steht schon drin, worauf sich der Auftrag bezieht. So lässt du einen Agenten anlegen und an einer Stelle einbauen, ihn anpassen oder ihn löschen. Beim Löschen („Mit KI löschen, Pipeline läuft weiter“) schreibt die KI die Schritte drumherum so um, dass die Pipeline weiterläuft (Übergaben, Schleifen, Prüfungen), und erklärt jede Änderung in einem Satz.
+
+In der Seite siehst du den Fortschritt. Hat die KI eine Rückfrage, steht sie als Formular im Feld, und deine Antwort geht an die Sitzung zurück. Abbrechen geht jederzeit; geschrieben wurde dann noch nichts. Am Ende stehen die Dauer des Auftrags und, wenn Claude Code sie meldet, die Tokens, die der Agent aus deinem Abo verbraucht hat. Danach öffnet sich die Vorschau wie bei jedem Änderungssatz, und übernommen wird nur, was du anhakst. Im Chat steht je Auftrag:
+
+```text
+Auftrag a1-3f9c2e aus der Werkstatt: ändern.
+Vorschlag zu Auftrag a1-3f9c2e liegt in der Werkstatt zur Vorschau.
+```
+
+#### Pipeline bewerten
+
+„Pipeline bewerten“ unter dem Kopf eines Ablaufs lässt die KI die Pipeline prüfen: fehlende Prüfer, Schleifen ohne Grenze, keine Freigabe vor dem Veröffentlichen, zu weite Rechte, doppelte Arbeit. Sie schlägt höchstens acht Verbesserungen vor, jede mit Begründung und einer Stelle im Kit als Beleg. Die Werkstatt prüft, dass das Zitat dort wirklich steht und dass die skizzierte Änderung die Prüfung besteht, und lässt Vorschläge weg, die das nicht tun. Fährst du über einen Vorschlag, steht er gestrichelt im Ablaufbild; angehakte bleiben sichtbar. „Ausgewählte einbauen“ baut genau die angehakten ein, und du siehst danach die Vorschau wie bei jedem Änderungssatz. Hat die Skill noch keinen Ablauf, zeigt die Liste stattdessen die Dateiänderung; für das Bild führ vorher `/atlas:analyse` aus.
+
+#### Neue Pipeline
+
+„+ Neue Pipeline“ am Ende der Skill-Leiste legt eine neue Skill im geöffneten Kit oder Projekt an, aufrufbar wie jede andere Skill des Kits.
+
+**Von Hand:** Zuerst gibst du Name, Nutzen in einem Satz und Beschreibung an, auf Wunsch auch, was hineingeht und was herauskommt. Dann öffnet sich eine leere Leinwand. Links liegen die Bausteine: Mensch-Schritt, Schritt ohne Agent, Parallelgruppe und die Agenten des Kits nach Rolle, dazu „+ Neuer Agent“. Du ziehst sie auf einen Pfeil oder tippst sie an, dann hängen sie hinten an. Ein Klick auf einen Kasten öffnet sein Formular: Titel, „Was soll der Schritt tun?“, nach vorn oder hinten schieben, Schleife setzen, entfernen. „Weiter zur Vorschau“ prüft den Entwurf, etwa ob jeder Schritt eine Anweisung hat, und zeigt dann die neue `SKILL.md` mit Anweisungstext und Atlas-Angaben, dazu die neuen Agenten. Der Entwurf lebt in der Seite: Du kannst zwischendurch andere Skills ansehen und kommst über die Skill-Leiste zurück, aber Neuladen verwirft ihn. Verwerfen fragt vorher nach.
+
+**Mit KI:** Du beschreibst unter „Was soll die Pipeline erledigen?“ in deinen Worten, was sie tun soll, und klickst „Vorschlag machen“. Der `pipeline-planer` kennt die Agenten deines Kits und nutzt sie, wo es passt; fehlt etwas, legt er neue an. Fehlt ihm eine Angabe, stellt er eine Rückfrage, die du im Feld beantwortest. Dann zeigt die Seite seinen Vorschlag als Ablaufbild, darunter Häkchen für jeden Schritt, jeden neuen Agenten und jede Schleife. Daneben öffnet sich ein Chat mit dem Planer: Schreib etwa „noch ein Sicherheitsprüfer vor dem Veröffentlichen“ oder „ohne Mensch-Freigabe“, und er macht eine neue Runde. Jede Runde zeichnet den Ablauf neu und markiert, was neu ist; was du abgewählt hast, bleibt abgewählt. Am Ende hast du drei Wege: „Übernehmen“ schreibt die angehakten Teile über die Änderungsvorschau wie jeden anderen Änderungssatz; passt die Auswahl nicht zusammen (etwa ein Schritt ohne seinen neuen Agenten), sagt die Seite das vorher. „Auf der Leinwand weiterbauen“ legt die angehakten Teile als Entwurf auf die Leinwand, und du baust von Hand weiter. „Verwerfen“ wirft den Vorschlag weg. Ein Vorschlag wartet in der Werkstatt, auch wenn du zwischendurch etwas anderes machst; in der Skill-Leiste führt ein Knopf zu ihm zurück. Ohne Nachricht und ohne Übernahme verfällt er nach 24 Stunden.
+
+#### Läufe starten und verfolgen
+
+„Lauf starten“ unter dem Kopf eines Ablaufs (in beiden Modi, auch bei einem nur gelesenen Kit) oder im Panel „Läufe“ in der Leiste startet eine Skill des Kits als echten Lauf: Es öffnet sich ein Terminal-Fenster mit Claude, das die Skill mit deinen Argumenten aufruft. Der Lauf nutzt dein Claude-Code-Abo, ohne API-Schlüssel. Fragen der Pipeline und Freigaben beantwortest du im Terminal; die Seite zeigt nur, was gerade passiert, und sagt dir, wenn Claude dort auf dich wartet.
+
+Bei einem Plugin-Kit wählst du den Arbeitsordner, in dem die Pipeline arbeitet (vorbelegt mit dem zuletzt benutzten, „Ordner wählen…“ öffnet die Ordnerauswahl des Systems); ein Projekt läuft immer in seinem Projektordner. Ein schreibbares Kit läuft mit dem Stand im Kit-Ordner, auch mit Änderungen, die noch nicht gespeichert sind; ein installiertes Kit läuft als installierte Fassung.
+
+Während des Laufs zeigt die Werkstatt vier Sichten:
+
+- **Im Ablaufbild** leuchten die Schritte, deren Agent, Skill oder Werkzeug gerade arbeitet; erledigte tragen einen Haken, und eine Plakette zählt die Runden einer Schleife. Schritte ohne Agent, Skill oder Werkzeug (etwa ein Mensch-Schritt) sieht die Werkstatt nicht.
+- **Die Zeitleiste** nennt je Agentenlauf Start, Schritt, Runde, Dauer und Tokens; aufgeklappt stehen Auftrag, die Antwort des Agenten wörtlich und seine Log-Zeilen. Die Log-Zeilen der Hauptsitzung stehen in einem eigenen Eintrag. Unter jedem Eintrag steht, wer ihn gestartet hat, etwa „aufgerufen von der Hauptsitzung, nach Aufruf der Skill unter um 10:04:12“. Starten mehrere Schritte denselben Agenten, auch über eine Skill, die ein Schritt aufruft, ist sein Lauf geteilt: Die Werkstatt zeigt ihn an allen diesen Schritten gestrichelt und rät nicht, welcher es war; das sagt dir der Aufrufer.
+- **Kosten und Dauer** zeigen je Agent und für den ganzen Lauf Minuten und Tokens, wie Claude Code sie meldet. Die Tokens der Hauptsitzung kennt die Werkstatt nicht, und Euro zeigt sie keine.
+- **Frühere Läufe** bleiben gespeichert, lassen sich wieder ansehen (mit dem Ablauf von damals) und zwei Läufe desselben Ablaufs im Vergleich nebeneinanderstellen.
+
+Die Werkstatt sieht einen Lauf über eigene Hooks, die sie nur der so gestarteten Sitzung mitgibt (`claude --settings`); in deinen anderen Sitzungen greift kein Hook von atlas-kit. Die Daten liegen im Ergebnisordner unter `atlas-kit/werkstatt/laeufe/`, nicht im Repo, und die Werkstatt behält die letzten 50 abgeschlossenen Läufe. Gespeichert werden Zeiten, Namen, Aufträge, die Antworten der Agenten bis 4000 Zeichen und gekürzte Befehle und Pfade; nie ein Prompt, ein Dateiinhalt oder deine Antwort auf eine Frage.
+
+„Abbrechen“ sperrt im laufenden Lauf jedes weitere Werkzeug; Claude sagt dir dann im Terminal, dass der Lauf abgebrochen ist, und du schließt das Fenster. Endet die Sitzung (Fenster zu oder `/exit`), ist der Lauf beendet; wartet Claude nach getaner Arbeit auf deine Eingabe, schließt du ihn mit „Lauf abschließen“ ab. Kommt lange kein Ereignis mehr, bietet die Seite „Lauf ablegen“ an. Unter Windows dürfen die Argumente kein " enthalten. Schreib sie ohne Anführungszeichen. Der Dialog weist sie ab, weil cmd sonst die Anführungszeichen um das Argument beendet und ein & dahinter als eigener Befehl liefe; statt `"Q3 Bericht"` schreibst du also einfach `Q3 Bericht`. Unter Linux öffnet die Werkstatt kein Fenster: Sie zeigt die ganze Befehlszeile zum Kopieren, und der Lauf erscheint, sobald Claude im Terminal startet.
+
+#### Memory, Logs und Auswertung
+
+**Memory** ist das Feld `memory` eines Agenten in Claude Code. Mit `project` merkt sich der Agent Dinge in `.claude/agent-memory/<name>/` des Ordners, in dem die Pipeline läuft, mit `local` in `.claude/agent-memory-local/<name>/` (nur auf diesem Rechner), mit `user` in `~/.claude/agent-memory/<name>/` für alle Projekte; bei einem Plugin-Kit heißt der Ordner `<kit>-<agent>`. Claude Code lädt daraus `MEMORY.md` in den Prompt des Agenten und schaltet für ihn Lesen, Schreiben und Bearbeiten ein, auch wenn er sonst nur lesen darf; die Vorschau warnt dann. Ein Agent kann sich so auch Falsches merken. Memory wirkt nur, wenn Auto-Memory in Claude Code an ist; ist es aus, sagt die Werkstatt das, ändert deine Einstellungen aber nicht.
+
+**Logs** sind die Protokolle aus „Läufe starten und verfolgen“. Sie entstehen nur für Läufe, die du in der Werkstatt mit „Lauf starten“ beginnst; Läufe außerhalb der Werkstatt, etwa im eigenen Terminal, protokolliert atlas-kit nie, und es legt dafür keinen Hook in dein Kit. Ohne Logs öffnet „Lauf starten“ nur das Terminal: kein Live-Verlauf, keine früheren Läufe und keine Auswertung.
+
+Beides fragt der Dialog „Neue Pipeline“ (von Hand und mit KI): Memory ist dort auf Nein, Logs auf Ja vorgewählt. Ändern kannst du es später unter „Memory und Logs“ unter dem Kopf eines Ablaufs: Logs und Auswertung als Schalter, die sofort gelten, den Bereich des Memorys je Agent als Änderung über die Vorschau. Memory ausschalten nimmt nur das Feld weg; die Dateien bleiben liegen.
+
+**Auswertung:** Ist sie für eine Pipeline an, liest der Agent `auswerter` nach jedem Lauf aus der Werkstatt die Protokolle der letzten Läufe (höchstens 20), die Kennzahlen, die die Werkstatt daraus zählt, und das Memory der Agenten dieser Pipeline. „Wann auswerten?“ stellt den Takt ein: nach jedem Lauf (Vorgabe), alle n Läufe, höchstens einmal je Zeitabstand oder nur auf Klick. Es zählen nur Läufe aus der Werkstatt mit Logs, die zu Ende gelaufen sind, und die Werkstatt prüft das nur, solange sie offen ist: am Ende eines Laufs, beim nächsten Öffnen und, beim Zeitabstand, sobald er abläuft. „Läufe auswerten“ stößt ihn jederzeit von Hand an. Er bewertet Agenten, Prüfungen und Schritte, schlägt Verbesserungen mit einer messbaren Erwartung vor und nennt Memory-Einträge, die falsch, veraltet oder doppelt sind. Jede Bewertung und jeder Vorschlag hat einen Beleg aus einem Lauf, eine Kennzahl oder eine Stelle im Kit, und die Werkstatt prüft jeden Beleg nach; was nicht stimmt, fällt weg. Jede Auswertung kostet Kontingent aus deinem Claude-Code-Abo. Anders als „Pipeline bewerten“, das nur den Bauplan liest, schaut der Auswerter auf echte Läufe.
+
+Angehakte Vorschläge baut der `umbauer` ein wie beim Gutachten. Angehakte Memory-Einträge entfernt die Werkstatt selbst: Sie schreibt dabei außerhalb des Kits, nur in den genannten Memory-Ordnern der Agenten dieser Pipeline, prüft jeden Ordner unmittelbar vor dem Schreiben (kein Symlink, noch derselbe Ordner) und zeigt vorher die Vorschau mit dem echten Pfad. Davor legt sie eine Sicherung an; Rückgängig in der Leiste holt die Zeilen zurück. Memory-Dateien werden nicht committet, auch wenn sie in deinem Repo liegen; „Speichern“ nennt sie nur.
+
+#### Sicherung, Rückgängig und Speichern
+
+- Vor jeder Änderung legt die Werkstatt eine Sicherung in `atlas-kit/werkstatt/` an. Scheitert das Schreiben mittendrin, stellt sie den alten Stand selbst wieder her.
+- „Rückgängig“ in der Leiste holt den Stand vor der letzten übernommenen Änderung zurück, auch mehrmals hintereinander und auch nach einem Neustart der Werkstatt. Hat jemand die Datei seitdem anders geändert, fragt die Werkstatt vorher.
+- „Speichern“ macht aus deinen Änderungen einen git-Commit, nur mit den Dateien, die die Werkstatt seit ihrem Start geändert hat; andere Änderungen in deinem Repo bleiben, wie sie sind. Was eine frühere, schon beendete Werkstatt übernommen hat, committest du selbst mit git. Das Speichern geschieht nur, wenn du klickst. Gepusht und hochgeladen wird nichts.
+
+#### Wie die KI arbeitet
+
+Die KI arbeitet in deiner laufenden Claude-Code-Sitzung, mit deinem Abo und ohne API-Schlüssel; der Server selbst ruft keine KI auf. Darum bleibt die Sitzung, in der du `/atlas:werkstatt` gestartet hast, danach offen und wartet auf Aufträge aus der Seite. Die Agenten laufen mit dem Modell deiner Sitzung. Unterbrechen kannst du mit Esc in Claude Code; `/atlas:werkstatt` setzt die Sitzung danach fort (arbeitest du nicht im Ordner des Kits, mit dem Kit dahinter, etwa `/atlas:werkstatt ~/mein-kit`). Der Browser öffnet sich dabei noch einmal, und die neue Sitzung löst die alte ab. Ganz zu Ende ist sie mit „Werkstatt beenden“ in der Seite. Läuft gerade keine Werkstatt-Sitzung, zeigt das Feld „Sitzung nicht verbunden“; dein Auftrag wartet dann, bis du `/atlas:werkstatt` wieder startest. Meldet sich eine Sitzung zu einem angenommenen Auftrag eine Stunde lang nicht, wartet der Auftrag wieder auf eine Sitzung.
+
+Für jeden Auftrag legt die Werkstatt eine Kopie des Kits in `atlas-kit/werkstatt/kopie/` an. Ein Agent des Pakets liest nur diese Kopie und schlägt einen Änderungssatz vor: `umbauer` ändert und baut Vorschläge ein, `gutachter` bewertet und macht belegte Vorschläge, `pipeline-planer` plant neue Pipelines, `auswerter` wertet bei „Läufe auswerten“ die Protokolle früherer Läufe aus. Alle vier dürfen nur lesen, und Texte aus dem Kit behandeln sie als Material, nicht als Anweisung; die einzige Anweisung ist dein Auftrag. Die Werkstatt prüft jeden Vorschlag, bevor du ihn siehst: Form, nur erlaubte Dateien, ein Probelauf in einer Kopie ohne neue Hinweise zum Bauplan, jeder neue Schritt mit Beleg. Besteht er nicht, bekommt der Agent einen zweiten Versuch.
+
+#### Erlaubnisabfragen
+
+Claude Code fragt, ob es `bin/atlas-kit werkstatt …` ausführen darf (Aufträge abholen, Fortschritt melden, Ergebnis abgeben, mehrmals je Auftrag) und ob es die Antwort des Agenten mit Write in `atlas-kit/werkstatt/auftraege/` speichern darf. Den Agenten zu starten und die Kopie zu lesen braucht keine Erlaubnis. Damit die Werkstatt nicht bei jedem Schritt nachfragt, kannst du `bin/atlas-kit werkstatt` dauerhaft erlauben: Wähl bei der ersten Abfrage zu diesem Befehl die Antwort, die nicht mehr nachfragt, oder trag die Regel selbst in die `.claude/settings.local.json` deines Arbeitsordners ein. Sie besteht aus dem Anfang des Befehls, so wie ihn die Abfrage zeigt, bis einschließlich `werkstatt`, und `:*` dahinter, dazu eine Regel für die Antwortdateien:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(CLAUDE_PLUGIN_DATA=\"<datenordner>\" sh \"<plugin-ordner>/bin/atlas-kit\" werkstatt:*)",
+      "Edit(atlas-kit/werkstatt/auftraege/**)"
+    ]
+  }
+}
+```
+
+`<datenordner>` und `<plugin-ordner>` sind die Pfade aus der Abfrage. Allgemeinere Regeln mit `*` im Pfad lassen auch andere Befehle durch; nimm sie nicht.
+
+#### Sicherheit und was trotzdem bleibt
+
+Was die Werkstatt schützt:
+
+- Der Server ist nur von deinem Rechner aus erreichbar. Ändern darf nur die Seite: Der Browser bekommt einen Link, der einmal gilt; die Seite tauscht ihn gegen ihren Schlüssel und entfernt ihn aus der Adresse. Der Schlüssel steht nie im Chat. Claude bekommt einen zweiten Schlüssel, mit dem es Vorschläge einreichen, aber nichts übernehmen, rückgängig machen oder speichern kann.
+- Geschrieben werden nur die Dateien der Skills und Agenten des geöffneten Kits und seine Ergebnisse in `atlas-kit/`, nie etwas in `.git/` oder in anderen versteckten Ordnern (außer `.claude/` im Projekt). Sicherung und Verlauf sind mit einem Schlüssel außerhalb des Kits beglaubigt; untergeschobene Sicherungen spielt die Werkstatt nicht zurück.
+- Die KI-Agenten dürfen nur lesen, und nur die Kopie. Was sie vorschlagen, prüft die Werkstatt, und geschrieben wird erst nach deinem Haken.
+
+Was bleibt:
+
+- Die Schlüssel halten Chat und Protokolle sauber. Eine Grenze gegen ein Programm, das auf deinem Rechner mit deinen Rechten läuft, sind sie nicht.
+- Ein fremdes Kit kann in seinen Texten versuchen, der KI Anweisungen unterzuschieben. Die Agenten behandeln Kit-Texte als Material, und die Prüfung lässt nur erlaubte Dateien und belegte Schritte durch. Ein Vorschlag kann trotzdem etwas anderes tun, als sein Titel sagt. Lies darum den Diff, bevor du übernimmst, vor allem den Anweisungstext: Was du übernimmst, führt Claude später aus, wenn jemand die Pipeline startet.
+- Dauerhafte Erlaubnisse gelten, bis du sie wieder entfernst. Erlaub nur die beiden Regeln oben und keine allgemeineren.
+- Jeder KI-Auftrag verbraucht Kontingent deines Abos. Die Seite zeigt nachher die Dauer und, soweit Claude Code sie meldet, die Tokens.
+
+### Mit leerem Ordner anfangen
+
+```
+/atlas:neu mein-kit
+/atlas:neu mein-kit ~/kits
+```
+
+`/atlas:neu` legt ein neues, leeres Kit an und öffnet es gleich in der Werkstatt, direkt im Dialog „Neue Pipeline“: Dort wählst du, ob du die erste Pipeline von Hand oder mit KI baust. Der Name schreibt sich wie ein Plugin-Name, also klein, mit Ziffern und einzelnen Bindestrichen, zum Beispiel `mein-kit`. Ohne Ordner entsteht das Kit im Ordner, in dem du gerade arbeitest, sonst im genannten. atlas-kit legt `mein-kit/.claude-plugin/plugin.json` mit Name und Version 0.1.0 an, macht daraus ein eigenes git-Repo mit einem ersten Commit und startet die Werkstatt. Liegt dort schon etwas, bricht es ab und überschreibt nichts. Ohne git entsteht das Kit trotzdem; nur „Speichern“ als Commit geht dann nicht. Im Chat steht:
+
+```text
+Neues Kit mein-kit angelegt in ~/kits/mein-kit.
+Mit eigenem git-Repo und erstem Commit; „Speichern“ in der Werkstatt legt weitere Commits an.
+Werkstatt für mein-kit läuft.
+Im Browser geöffnet.
+```
+
+Danach bleibt die Sitzung eine Werkstatt-Sitzung wie bei `/atlas:werkstatt` und erledigt die Aufträge mit KI.
+
+**Wieder öffnen.** Auf dem Mac legt `/atlas:neu` im Kit die Datei „Werkstatt öffnen.command“ an, unter Windows „Werkstatt öffnen.cmd“. Ein Doppelklick darauf im Finder bzw. Explorer öffnet ein Terminal und startet dort Claude Code mit `/atlas:werkstatt`. Unter Linux gibt es keine solche Datei; dort öffnest du das Kit mit `/atlas:werkstatt ~/mein-kit`. Im Chat steht nach `/atlas:neu` außerdem die Zeile „Wieder öffnen“ mit dem passenden Befehl. Für ein Kit, das du schon hast, legt `/atlas:werkstatt knopf` die Datei an (`/atlas:werkstatt knopf ~/mein-kit` für ein anderes). Sie gehört dir: Ins Repo nehmen musst du sie nicht.
+
+Die Werkstatt merkt sich außerdem die letzten zehn Kits, die du darin geöffnet hast (nur ihre Ordner, im Datenordner von atlas-kit). Rufst du `/atlas:werkstatt` in einem Ordner ohne Kit auf, zeigt sie diese Liste mit dem Befehl zum Öffnen dahinter. Und `/atlas:werkstatt mein-kit` findet ein zuletzt geöffnetes Kit auch über seinen Namen, nicht nur ein installiertes. Heißen mehrere so, etwa dein Kit und seine installierte Kopie, nennt die Werkstatt alle mit ihrem Befehl, und du wählst einen.
+
+### `/atlas:app` legt das Programm Atlas Werkstatt an
+
+```
+/atlas:app
+/atlas:app desktop
+```
+
+Wer nicht mit Befehlen arbeiten will, öffnet die Werkstatt über ein eigenes Programm. `/atlas:app` legt es einmal an: auf macOS als „Atlas Werkstatt“ in `~/Applications` (du findest es im Launchpad und mit Spotlight und kannst es ins Dock ziehen), auf Windows als Eintrag im Startmenü, mit `desktop` zusätzlich auf dem Desktop. Im Chat steht dann zum Beispiel:
+
+```text
+Angelegt: ~/Applications/Atlas Werkstatt.app. Du findest Atlas Werkstatt im Launchpad und mit Spotlight; zieh es ins Dock, dann ist es mit einem Klick da.
+```
+
+Ein Klick auf das Programm öffnet ein eigenes Fenster ohne Adressleiste (in Google Chrome bzw. Microsoft Edge; ohne Chrome auf macOS im Standardbrowser). Darin legst du ein neues Kit an (Name und Ort, als Ort schlägt es `~/Pipelines` vor oder den zuletzt benutzten), öffnest eines aus der Liste „Zuletzt geöffnet“ oder wählst mit „Anderes Kit öffnen…“ einen Ordner aus. Beim Öffnen geht zusätzlich ein Terminal-Fenster mit Claude auf: Dort startet die Werkstatt, dort arbeitet die KI und fragt dich, bevor sie etwas ändert, so wie es in Claude Code eingestellt ist. Für diese Arbeit schickt Claude Code die nötigen Teile deines Kits an Anthropic, wie bei jeder Arbeit mit Claude. Lass es offen, solange du in der Werkstatt arbeitest. Fehlt Claude Code auf dem Rechner, sagt das Fenster, was zu tun ist.
+
+Das Fenster wird von einem kleinen Server auf deinem Rechner gezeigt, der nur Ordner prüft und selbst nichts an deinen Kits ändert. Er beendet sich zehn Minuten, nachdem du das Fenster geschlossen hast. Nach einem Update von atlas-kit startet das Programm die neue Fassung, weil es beim Start nachsieht, wo Claude Code atlas-kit gerade führt. Findet es atlas-kit dort nicht mehr, sagt es das; ruf dann `/atlas:app` noch einmal auf, das ersetzt das Programm durch ein aktuelles.
 
 ### Wo die Dateien liegen
 
-Die Ergebnisse liegen im Ordner `atlas-kit/` in deinem Arbeitsordner: der Bauplan als `<kit>.atlas.json`, die abgeleiteten Abläufe als `<kit>.ableitung.json` und die Seite als `<kit>.html`. Während einer Ableitung liegen dort außerdem kurz ihre Arbeitsdateien, die atlas-kit am Ende wieder entfernt. Arbeitest du im Kit oder Projekt selbst, liegt `atlas-kit/` darin. Sonst ändert sich dort nichts. Legt atlas-kit den Ordner neu an, sagt es das einmal:
+Die Ergebnisse liegen im Ordner `atlas-kit/` in deinem Arbeitsordner: der Bauplan als `<kit>.atlas.json`, die abgeleiteten Abläufe als `<kit>.ableitung.json` und die Seite als `<kit>.html`. Während einer Ableitung liegen dort außerdem kurz ihre Arbeitsdateien, die atlas-kit am Ende wieder entfernt. Arbeitest du im Kit oder Projekt selbst, liegt `atlas-kit/` darin. Die Werkstatt legt `atlas-kit/` bei einem eigenen Kit immer im Kit an, egal von wo du sie startest, und darin `werkstatt/` mit Sicherungen, Verlauf, den Kopien für die KI und den Läufen; nur ein installiertes Kit bleibt beim Arbeitsordner. Findet sie einen älteren Verlauf von einem Start aus einem anderen Ordner, bietet die Seite an, ihn zu übernehmen; verschoben wird nichts. Sonst ändert sich dort nichts. Legt atlas-kit den Ordner neu an, sagt es das einmal:
 
 ```text
 Neu angelegt: der Ordner atlas-kit/ für die Ergebnisse. Soll er nicht ins Repo, trag ihn in .gitignore ein.
@@ -211,9 +401,17 @@ Fehlt bei einem Schritt `agent`, `parallel`, `werkzeug` und `skill`, führt die 
 
 ## Was atlas-kit nicht tut
 
-- Es ändert das gelesene Kit oder Projekt nicht und schreibt keine abgeleiteten Angaben hinein. Es schreibt nur in den Ordner `atlas-kit/`.
-- Es lädt nichts hoch. Die Seite entsteht auf deinem Rechner und bleibt dort, bis du sie weitergibst.
-- Es trägt keine Atlas-Angaben ins Kit ein. Abgeleitete Abläufe bleiben in `atlas-kit/`; eigene Angaben schreibst du selbst nach der Anleitung oben.
+- Es ändert das gelesene Kit oder Projekt nicht und schreibt keine abgeleiteten Angaben hinein. Es schreibt nur in den Ordner `atlas-kit/`. Einzige Ausnahme ist die Werkstatt: Sie schreibt die Änderungen, die du in ihrer Vorschau übernimmst, und sonst nichts.
+- Es lädt nichts hoch. Die Seite entsteht auf deinem Rechner und bleibt dort, bis du sie weitergibst. Auch „Speichern“ in der Werkstatt committet nur, gepusht wird nie.
+- Es trägt keine Atlas-Angaben ins Kit ein, außer du übernimmst eine Änderung in der Werkstatt. Abgeleitete Abläufe bleiben in `atlas-kit/`; eigene Angaben schreibst du selbst nach der Anleitung oben.
+
+## Grenzen
+
+- Fragen und Freigaben eines Laufs beantwortest du im Terminal, nicht in der Seite. Hooks zeigt die Seite, bearbeiten lassen sie sich nicht.
+- Bearbeiten geht nur in der Werkstatt, nicht in der weitergegebenen Seite. Ein installiertes Kit öffnet die Werkstatt nur zum Lesen.
+- Die KI-Teile brauchen eine laufende Claude-Code-Sitzung mit `/atlas:werkstatt`. Ohne sie geht alles von Hand, die KI-Aufträge warten.
+- Abgeleitete Abläufe sind Lesarten der Beschreibungen. Zwei Läufe können leicht verschiedene Abläufe ergeben; belegt ist jeder Schritt trotzdem. Von Hand in einen abgeleiteten Ablauf eingefügte Schritte stehen als eigener Abschnitt im Text, nicht im Stil der Skill.
+- Seite, Chat und Anleitung gibt es nur auf Deutsch.
 
 ## MakeNative
 
@@ -229,3 +427,5 @@ Christian Eichmüller · [LinkedIn](https://linkedin.com/in/christianeichmueller
 ## Lizenz
 
 MIT
+
+Die Seite enthält die Schrift Instrument Sans unter der SIL Open Font License 1.1 (siehe [LICENSE-FONT](LICENSE-FONT)).

@@ -48,7 +48,8 @@ def pruefe_belege(kit: Path, knoten: list[dict], kanten: list[dict],
             befunde.melde("beleg_falsch",
                           f"Das Zitat am Knoten {k['id']} steht nicht in {beleg.get('datei')} "
                           f"Zeile {beleg.get('zeile')}; der Beleg entfällt",
-                          beleg.get("datei") or k.get("datei") or "", beleg.get("zeile"))
+                          beleg.get("datei") or k.get("datei") or "", beleg.get("zeile"), aussage="beleg",
+                          ziel_art="knoten", ziel=str(k["id"]))
             del k["beleg"]
             if k.get("typ") == "hook":
                 k.pop("bewacht", None)
@@ -57,9 +58,20 @@ def pruefe_belege(kit: Path, knoten: list[dict], kanten: list[dict],
             befunde.melde("beleg_falsch",
                           f"Das Zitat der Rolle am Knoten {k['id']} steht nicht in {rolle_beleg.get('datei')} "
                           f"Zeile {rolle_beleg.get('zeile')}; die Rolle entfällt",
-                          rolle_beleg.get("datei") or k.get("datei") or "", rolle_beleg.get("zeile"))
+                          rolle_beleg.get("datei") or k.get("datei") or "", rolle_beleg.get("zeile"),
+                          aussage="rolle_beleg", ziel_art="knoten", ziel=str(k["id"]))
             for feld in ("rolle", "rolle_herkunft", "rolle_beleg"):
                 k.pop(feld, None)
+        prompt = k.get("prompt")
+        hinweis = prompt.get("fertig_hinweis") if isinstance(prompt, dict) else None
+        if isinstance(hinweis, dict) and not _zitat_stimmt(dateien, hinweis.get("beleg") or {}):
+            beleg = hinweis.get("beleg") or {}
+            befunde.melde("beleg_falsch",
+                          f"Das Zitat zu Fertig im Prompt am Knoten {k['id']} steht nicht in {beleg.get('datei')} "
+                          f"Zeile {beleg.get('zeile')}; der Hinweis entfällt",
+                          beleg.get("datei") or k.get("datei") or "", beleg.get("zeile"),
+                          aussage="prompt.fertig_hinweis", ziel_art="knoten", ziel=str(k["id"]))
+            del prompt["fertig_hinweis"]
 
     behalten = []
     for kante in kanten:
@@ -81,5 +93,6 @@ def pruefe_belege(kit: Path, knoten: list[dict], kanten: list[dict],
             befunde.melde("beleg_falsch",
                           f"Kante {kante.get('von')} -{kante.get('typ')}-> {kante.get('nach')}: "
                           f"{grund}; die Kante entfällt",
-                          beleg.get("datei") or "", beleg.get("zeile"))
+                          beleg.get("datei") or "", beleg.get("zeile"), aussage="kante",
+                          ziel_art=str(kante.get("typ")), ziel=f"{kante.get('von')} -> {kante.get('nach')}")
     return knoten, behalten

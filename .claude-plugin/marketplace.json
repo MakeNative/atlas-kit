@@ -7,7 +7,7 @@
     {
       "name": "atlas",
       "source": ".",
-      "description": "Zeigt, was in einem Claude-Code-Kit oder Projekt steckt: /atlas:init liest ein, leitet die Abläufe ab und baut die Seite; einzeln gibt es /atlas:scan, /atlas:analyse und /atlas:render."
+      "description": "Zeigt, was in einem Claude-Code-Kit oder Projekt steckt: /atlas:init liest ein, leitet die Abläufe ab und baut die Seite; einzeln gibt es /atlas:scan, /atlas:analyse und /atlas:render; /atlas:werkstatt öffnet die Seite zum Bearbeiten, von Hand oder mit KI; /atlas:neu legt ein neues Kit an und öffnet es dort."
     }
   ]
 }

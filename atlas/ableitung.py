@@ -8,14 +8,10 @@ from pathlib import Path
 
 from befunde import Befunde
 from textdatei import lies_zeilen
+from vokabular import AUSFUEHRENDE, MENSCH, ROLLEN, SCHRITT_ID, WERKZEUG_PFAD
 
 SCHEMA = "atlas-ableitung/0.1"
 ABGELEITET = "abgeleitet"
-ROLLEN = ("planer", "umsetzer", "pruefer")
-MENSCH = ("rueckfrage", "freigabe", "abnahme")
-AUSFUEHRENDE = ("agent", "parallel", "werkzeug", "skill")
-SCHRITT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
-WERKZEUG_PFAD = re.compile(r"^tools/([^/]+)\.py$")
 TITEL_HOECHSTENS = 40
 WOERTER_MINDESTENS = 3
 
@@ -71,17 +67,46 @@ def offene(skill_paare, agent_knoten: list[dict]) -> dict:
     }
 
 
-def _ist_zahl(wert: object) -> bool:
+def ist_zahl(wert: object) -> bool:
+    """Eine ganze Zahl, kein Wahrheitswert: so gelten Zeilen und Grenzen der Ableitung (auch in der Werkstatt)."""
     return isinstance(wert, int) and not isinstance(wert, bool)
 
 
+def belegzeile(beleg: object) -> int | None:
+    """Die Zeile eines Belegs, wenn sie eine ganze Zahl ist (nach ist_zahl), sonst None."""
+    zeile = beleg.get("zeile") if isinstance(beleg, dict) else None
+    return zeile if ist_zahl(zeile) else None
+
+
+def name_belegt(zeilen: list[str], beleg: object, name: str) -> bool:
+    """Der Beleg einer Aussage über einen Ausführenden: gültig nach beleg_grund und mit dem Namen im Zitat."""
+    return beleg_grund(zeilen, beleg) is None and name in beleg["zitat"]
+
+
+def grenze_belegt(grenze: object, zitat: str) -> bool:
+    """Die Grenze einer Schleife (höchstens n Runden) steht als Zahl im Zitat ihres Belegs."""
+    return ist_zahl(grenze) and grenze >= 1 and re.search(rf"(?<!\d){grenze}(?!\d)", zitat) is not None
+
+
+def abgeleitete_schritte(eintrag: object) -> list | None:
+    """Die Schritte eines Eintrags der Ableitung, wie der Scanner sie liest; None, wenn der Eintrag keine Liste von
+    Schritten hat. Sie gelten nur für eine Skill ohne eigene atlas.schritte (vokabular.schritte_eigen)."""
+    schritte = eintrag.get("schritte") if isinstance(eintrag, dict) else None
+    return schritte if isinstance(schritte, list) else None
+
+
+def rolle_offen(atlas: object) -> bool:
+    """Gilt für einen Agenten mit diesem atlas-Feld eine abgeleitete Rolle? Nur ohne eigene atlas.rolle."""
+    return not isinstance(atlas, dict) or atlas.get("rolle") is None
+
+
 def _zeile_text(zeile: object) -> str:
-    return str(zeile) if _ist_zahl(zeile) else json.dumps(zeile, ensure_ascii=False)
+    return str(zeile) if ist_zahl(zeile) else json.dumps(zeile, ensure_ascii=False)
 
 
 def beleg_grund(zeilen: list[str], beleg: object) -> str | None:
     zeile = beleg.get("zeile") if isinstance(beleg, dict) else None
-    if not _ist_zahl(zeile) or not 1 <= zeile <= len(zeilen):
+    if not ist_zahl(zeile) or not 1 <= zeile <= len(zeilen):
         return f"Zeile {_zeile_text(zeile)} gibt es nicht"
     zitat = beleg.get("zitat")
     nicht_drin = f"das Zitat steht nicht in Zeile {zeile}"
@@ -98,8 +123,8 @@ def beleg_grund(zeilen: list[str], beleg: object) -> str | None:
 
 
 def _zeile_in_datei(zeilen: list[str], beleg: object) -> int | None:
-    zeile = beleg.get("zeile") if isinstance(beleg, dict) else None
-    return zeile if _ist_zahl(zeile) and 1 <= zeile <= len(zeilen) else None
+    zeile = belegzeile(beleg)
+    return zeile if zeile is not None and 1 <= zeile <= len(zeilen) else None
 
 
 @dataclass
@@ -139,8 +164,12 @@ class _SkillPruefung:
         self.knoten_ids = knoten_ids
         self.befunde = befunde
 
-    def melde(self, art: str, text: str, beleg: object) -> None:
-        self.befunde.melde(art, text, self.datei, _zeile_in_datei(self.zeilen, beleg), herkunft=ABGELEITET)
+    def melde(self, art: str, text: str, beleg: object, schritt: object, *, aussage: str,
+              ziel_art: str | None = None, ziel: object = None) -> None:
+        """Ein Befund mit seinem Ort: Skill, Schritt-id (wenn sie ein Text ist), Aussage und Ziel."""
+        self.befunde.melde(art, text, self.datei, _zeile_in_datei(self.zeilen, beleg), herkunft=ABGELEITET,
+                           skill=self.name, schritt=schritt if isinstance(schritt, str) else None, aussage=aussage,
+                           ziel_art=ziel_art, ziel=None if ziel is None else str(ziel))
 
     def schritt_id(self, schritt_id: str) -> str:
         return f"schritt:{self.name}/{schritt_id}"
@@ -189,7 +218,7 @@ class _SkillPruefung:
                 elif grund.startswith("id '"):
                     art = "widerspruch"
                 self.melde(art, f"Abgeleiteter Schritt {self._titel_im_text(roh, pos)} entfällt: {grund}.",
-                           roh.get("beleg"))
+                           roh.get("beleg"), roh.get("id"), aussage="schritt")
                 entfallen += 1
                 continue
             schritt = _Schritt(pos, roh, roh["id"], roh["titel"].strip(), roh["beleg"])
@@ -203,20 +232,20 @@ class _SkillPruefung:
         return eintrag if isinstance(eintrag, dict) else s.beleg
 
     def _beleg_mit_name(self, eintrag: object, name: str) -> bool:
-        return (beleg_grund(self.zeilen, eintrag) is None and isinstance(eintrag, dict)
-                and name in eintrag["zitat"])
+        return name_belegt(self.zeilen, eintrag, name)
 
     def _startziel(self, s: _Schritt, art: str, wert: str, ziel: str | None, name_im_zitat: str,
-                   eintrag: object) -> dict | None:
+                   eintrag: object, aussage: str | None = None) -> dict | None:
         ort = self._aussage_zeile_beleg(s, eintrag)
+        aussage = aussage or art
         if ziel is None or ziel not in self.knoten_ids:
             self.melde("verweis_fehlt", f"Abgeleiteter Schritt '{s.titel}': {ART_IM_TEXT[art]} {wert} gibt es nicht.",
-                       ort)
+                       ort, s.id, aussage=aussage, ziel_art=art, ziel=wert)
             return None
         if not self._beleg_mit_name(eintrag, name_im_zitat):
             self.melde("ohne_beleg",
                        f"Abgeleiteter Schritt '{s.titel}': Dass er {ART_IM_TEXT[art]} {wert} startet, ist nicht belegt.",
-                       ort)
+                       ort, s.id, aussage=aussage, ziel_art=art, ziel=wert)
             return None
         return self.kante(self.schritt_id(s.id), ziel, "startet", eintrag)
 
@@ -238,7 +267,7 @@ class _SkillPruefung:
             eintrag = s.belege.get("skill")
             if skill == self.name:
                 self.melde("widerspruch", f"Abgeleiteter Schritt '{s.titel}' kann sich nicht selbst starten.",
-                           self._aussage_zeile_beleg(s, eintrag))
+                           self._aussage_zeile_beleg(s, eintrag), s.id, aussage="skill", ziel_art="skill", ziel=skill)
             else:
                 kante = self._startziel(s, "skill", skill, f"skill:{skill}", skill, eintrag)
                 kanten += [kante] if kante else []
@@ -253,7 +282,7 @@ class _SkillPruefung:
         kanten = []
         for name in dict.fromkeys(n for n in namen if isinstance(n, str)):
             eintrag = belege.get(name)
-            kante = self._startziel(s, "agent", name, f"agent:{name}", name, eintrag)
+            kante = self._startziel(s, "agent", name, f"agent:{name}", name, eintrag, "parallel")
             if kante:
                 kanten.append({**kante, "typ": "parallel"})
         return kanten
@@ -261,7 +290,8 @@ class _SkillPruefung:
     def _mehrere_startziele(self, s: _Schritt) -> None:
         genannt = [f for f in AUSFUEHRENDE if s.roh.get(f) is not None]
         if len(genannt) > 1:
-            self.melde("widerspruch", f"Abgeleiteter Schritt '{s.titel}' nennt mehr als ein Startziel.", s.beleg)
+            self.melde("widerspruch", f"Abgeleiteter Schritt '{s.titel}' nennt mehr als ein Startziel.", s.beleg,
+                       s.id, aussage="startziele")
 
     def mensch(self, s: _Schritt) -> str | None:
         wert = s.roh.get("mensch")
@@ -272,11 +302,11 @@ class _SkillPruefung:
         if wert not in MENSCH:
             self.melde("widerspruch",
                        f"Abgeleiteter Schritt '{s.titel}': mensch '{wert}' ist kein erlaubter Wert; "
-                       f"die Mensch-Marke entfällt.", ort)
+                       f"die Mensch-Marke entfällt.", ort, s.id, aussage="mensch")
             return None
         if beleg_grund(self.zeilen, eintrag) is not None:
             self.melde("ohne_beleg", f"Abgeleiteter Schritt '{s.titel}': Die Mensch-Marke ist nicht belegt und entfällt.",
-                       ort)
+                       ort, s.id, aussage="mensch")
             return None
         return wert
 
@@ -290,24 +320,26 @@ class _SkillPruefung:
         schleife = f"Abgeleiteter Schritt '{s.titel}': Die Schleife zurück zu '{ziel}'"
         ziel_schritt = next((t for t in behalten if t.id == ziel), None)
         if ziel == s.id or (ziel_schritt is not None and ziel_schritt.pos >= s.pos):
-            self.melde("widerspruch", f"{schleife} führt nicht zurück.", ort)
+            self.melde("widerspruch", f"{schleife} führt nicht zurück.", ort, s.id, aussage="zurueck",
+                       ziel_art="schritt", ziel=ziel)
             return []
         if ziel_schritt is None:
-            self.melde("verweis_fehlt", f"{schleife} hat kein Ziel.", ort)
+            self.melde("verweis_fehlt", f"{schleife} hat kein Ziel.", ort, s.id, aussage="zurueck", ziel_art="schritt",
+                       ziel=ziel)
             return []
         if beleg_grund(self.zeilen, eintrag) is not None:
-            self.melde("ohne_beleg", f"{schleife} ist nicht belegt.", ort)
+            self.melde("ohne_beleg", f"{schleife} ist nicht belegt.", ort, s.id, aussage="zurueck",
+                       ziel_art="schritt", ziel=ziel)
             return []
         extra = {}
         grenze = bei_befund.get("max")
         if grenze is not None:
-            belegt = (_ist_zahl(grenze) and grenze >= 1
-                      and re.search(rf"(?<!\d){grenze}(?!\d)", eintrag["zitat"]) is not None)
-            if belegt:
+            if grenze_belegt(grenze, eintrag["zitat"]):
                 extra["max"] = grenze
             else:
                 self.melde("ohne_beleg", f"Abgeleiteter Schritt '{s.titel}': 'höchstens {grenze}' steht nicht "
-                                         f"im Zitat; die Grenze entfällt.", ort)
+                                         f"im Zitat; die Grenze entfällt.", ort, s.id, aussage="max",
+                           ziel_art="schritt", ziel=ziel)
         return [self.kante(self.schritt_id(s.id), self.schritt_id(ziel), "zurueck", eintrag, **extra)]
 
     def uebernimm(self, schritte: list) -> tuple[list[dict], list[dict], int]:
@@ -352,12 +384,14 @@ def _rolle(agent: dict, eintrag: object, wurzel: Path, befunde: Befunde, ergebni
     zeile = _zeile_in_datei(zeilen, beleg)
     if rolle not in ROLLEN:
         befunde.melde("widerspruch", f"Abgeleitete Rolle '{rolle}' für {agent['name']} entfällt: {KEINE_ERLAUBTE_ROLLE}.",
-                      agent["datei"], zeile, herkunft=ABGELEITET)
+                      agent["datei"], zeile, herkunft=ABGELEITET, aussage="rolle", ziel_art="agent",
+                      ziel=agent["name"])
         return
     grund = beleg_grund(zeilen, beleg)
     if grund is not None:
         befunde.melde("ohne_beleg", f"Abgeleitete Rolle '{rolle}' für {agent['name']} entfällt: {grund}.",
-                      agent["datei"], zeile, herkunft=ABGELEITET)
+                      agent["datei"], zeile, herkunft=ABGELEITET, aussage="rolle", ziel_art="agent",
+                      ziel=agent["name"])
         ergebnis.rollen_entfallen += 1
         return
     agent["rolle"] = rolle
@@ -371,11 +405,11 @@ def uebernimm(ableitung: dict, skill_paare, agent_knoten: list[dict], knoten_ids
     ergebnis = Ergebnis()
     eintraege = ableitung["skills"]
     for skill, fm in skill_paare:
-        eintrag = eintraege.get(skill["name"])
-        if skill["_schritte_eigen"] or not isinstance(eintrag, dict) or not isinstance(eintrag.get("schritte"), list):
+        schritte = abgeleitete_schritte(eintraege.get(skill["name"]))
+        if skill["_schritte_eigen"] or schritte is None:
             continue
         pruefung = _SkillPruefung(skill, fm.zeilen, knoten_ids, befunde)
-        knoten, kanten, entfallen = pruefung.uebernimm(eintrag["schritte"])
+        knoten, kanten, entfallen = pruefung.uebernimm(schritte)
         ergebnis.knoten[skill["name"]] = knoten
         ergebnis.kanten[skill["name"]] = kanten
         ergebnis.skills[skill["name"]] = {"schritte": len(knoten), "entfallen": entfallen}

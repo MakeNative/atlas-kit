@@ -5,6 +5,7 @@ import re
 
 from befunde import Befunde
 from ordner import Ordner
+from vokabular import SKILL_DATEI, name_oder, schritte_eigen
 from yaml_lesen import Frontmatter, lies_frontmatter, listen_feld, pfad_text, text_feld, wert_text
 
 ATLAS_SCHLUESSEL = ("nutzen", "eingabe", "ergebnis", "schritte")
@@ -35,17 +36,17 @@ def _atlas_felder(knoten: dict, fm: Frontmatter, befunde: Befunde) -> None:
                       f"atlas: erwartet eine Abbildung mit nutzen und schritte, gefunden "
                       f"{'einen leeren Wert' if atlas is None else wert_text(atlas)}; "
                       f"keine Felder und keine Schritte aus atlas",
-                      fm.datei, fm.zeile("atlas"))
+                      fm.datei, fm.zeile("atlas"), aussage="atlas")
         return
     for schluessel in atlas:
         if schluessel not in ATLAS_SCHLUESSEL:
             befunde.melde("nicht_unterstuetzt",
                           f"Unbekannter Schlüssel {pfad_text(('atlas', schluessel))} in der Skill; "
                           f"erlaubt sind {', '.join(ATLAS_SCHLUESSEL)}",
-                          fm.datei, fm.zeile("atlas", schluessel))
+                          fm.datei, fm.zeile("atlas", schluessel), aussage=pfad_text(("atlas", schluessel)))
     if not fm.hat("atlas", "nutzen"):
         befunde.melde("pflichtfeld_fehlt", "Im atlas-Feld fehlt das Pflichtfeld nutzen",
-                      fm.datei, fm.zeile("atlas"))
+                      fm.datei, fm.zeile("atlas"), aussage="atlas.nutzen")
     else:
         nutzen = text_feld(fm, ("atlas", "nutzen"), befunde)
         if nutzen is not None:
@@ -57,8 +58,7 @@ def _atlas_felder(knoten: dict, fm: Frontmatter, befunde: Befunde) -> None:
 
 
 def _schritte_eigen(fm: Frontmatter) -> bool:
-    atlas = fm.werte.get("atlas")
-    return isinstance(atlas, dict) and "schritte" in atlas
+    return schritte_eigen(fm.werte.get("atlas"))
 
 
 def lies_skills(quelle: Ordner, kit_id: str, agent_namen: set[str],
@@ -67,23 +67,19 @@ def lies_skills(quelle: Ordner, kit_id: str, agent_namen: set[str],
     kit = quelle.wurzel
     befehl = "/" if quelle.ist_projekt else f"/{kit_id}:"
     praefix = None if quelle.ist_projekt else f"{kit_id}:"
-    ordner = kit / quelle.skills
-    if not ordner.is_dir():
-        return []
     gefunden: dict[str, tuple[dict, Frontmatter]] = {}
-    for unter in sorted(p for p in ordner.iterdir() if p.is_dir()):
-        if not (unter / "SKILL.md").is_file():
-            continue
-        datei = f"{quelle.skills}/{unter.name}/SKILL.md"
+    for pfad in quelle.skill_dateien():
+        unter = pfad.parent
+        datei = f"{quelle.skills}/{unter.name}/{SKILL_DATEI}"
         fm = lies_frontmatter(kit, datei, befunde)
         if fm is None:
             continue
-        name = text_feld(fm, ("name",), befunde) or unter.name
+        name = name_oder(text_feld(fm, ("name",), befunde), unter.name)
         if name in gefunden:
             befunde.melde("widerspruch",
                           f"Skill {name} ist doppelt definiert (auch in {gefunden[name][0]['datei']}); "
                           f"{datei} wird nicht gelesen",
-                          datei, fm.zeile("name"))
+                          datei, fm.zeile("name"), aussage="name", ziel_art="skill", ziel=name)
             continue
         hinweis = text_feld(fm, ("argument-hint",), befunde)
         einstieg = f"{befehl}{name}" + (f" {hinweis}" if hinweis else "")

@@ -1,0 +1,4 @@
+# Shell-Skripte immer mit LF, auch nach git clone unter Windows mit core.autocrlf=true:
+# Mit CRLF bricht Git Bash an \r ab (docs/windows.md Fund 30).
+bin/atlas-kit text eol=lf
+*.sh text eol=lf

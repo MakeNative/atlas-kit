@@ -6,7 +6,6 @@ sys.dont_write_bytecode = True
 
 import json  # noqa: E402
 import os  # noqa: E402
-import subprocess  # noqa: E402
 import tempfile  # noqa: E402
 from datetime import datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -17,18 +16,30 @@ import browser  # noqa: E402
 import einrichtung  # noqa: E402
 import ergebnis  # noqa: E402
 import finden  # noqa: E402
+import neues_kit  # noqa: E402
+import plattform  # noqa: E402
+import scanner_lauf  # noqa: E402
 import seite  # noqa: E402
+import start  # noqa: E402
 import texte  # noqa: E402
+import werkstatt  # noqa: E402
+import zuletzt  # noqa: E402
 
 LESEN = ("scan", "render")
 ABLEITEN = ("analyse", "init")
 WEITERFUEHREN = ("antwort", "abbruch")
-BEFEHLE = LESEN + ABLEITEN + WEITERFUEHREN
+WERKSTATT = "werkstatt"
+NEU = "neu"
+START_APP = ("app", "start")
+BEFEHLE = LESEN + ABLEITEN + WEITERFUEHREN + (WERKSTATT, NEU) + START_APP
 DATEN_SCHALTER = "CLAUDE_PLUGIN_DATA"
 VORLAGE = Path("seite") / "vorlage.html"
 SCANNER = Path("atlas") / "scan.py"
 LEER_SAETZE = (texte.LEER_BEIDES, texte.LEER_SKILLS, texte.LEER_AGENTEN)
-AUFRUF = "Aufruf: atlas-kit scan|render|analyse|init [ordner | kit-name] oder atlas-kit antwort|abbruch <lauf>"
+AUFRUF = ("Aufruf: atlas-kit scan|render|analyse|init|werkstatt [ordner | kit-name], atlas-kit werkstatt stopp|oeffnen|knopf, "
+          "atlas-kit neu <name> [ordner], "
+          "atlas-kit werkstatt warte|fortschritt|frage|ergebnis|abbruch … oder atlas-kit antwort|abbruch <lauf>, "
+          "atlas-kit app [desktop], atlas-kit start")
 
 
 class Abbruch(Exception):
@@ -57,15 +68,18 @@ class Eingelesen:
 
 
 class Aufruf:
-    def __init__(self, befehl: str, argument: str):
+    def __init__(self, befehl: str, argument: str, weitere: list[str] | None = None):
         self.befehl = befehl
         self.argument = argument
+        # weitere Argumente nur für die Befehle der Werkstatt-Sitzung (WS-K4 bis WS-K8)
+        self.weitere = list(weitere or [])
         self.paket = Path(__file__).resolve().parent.parent
         self.home = Path(os.path.expanduser("~"))
         self.arbeitsordner = Path(os.getcwd())
         daten = os.environ.get(DATEN_SCHALTER, "").strip()
         self.daten = Path(daten) if daten else None
         self.neu_angelegt = False
+        self.unterbefehl = ""  # z. B. stopp oder knopf: steht dann in den Zeilen einer Auswahl (r21-6)
 
     @property
     def befehl_im_chat(self) -> str:
@@ -77,8 +91,17 @@ class Aufruf:
     def kit_im_arbeitsordner(self) -> finden.Kit:
         return finden.pruefe_ordner(self.arbeitsordner, self.home, self.befehl_im_chat)
 
+    def datenordner(self) -> Path:
+        return einrichtung.datenordner(self.paket, self.daten)
+
+    def zuletzt_geoeffnet(self) -> list[finden.Kit]:
+        """WS-NK8: die zuletzt in der Werkstatt geöffneten Kits, die es noch gibt."""
+        return zuletzt.kits(self.datenordner(), self.home, self.befehl_im_chat)
+
     def kit_aus_argument(self) -> finden.Kit:
-        return finden.finde_kit(self.argument, self.arbeitsordner, self.home, self.befehl_im_chat)
+        eigene = self.zuletzt_geoeffnet() if self.befehl == WERKSTATT else None
+        auswahl = f"{self.befehl_im_chat} {self.unterbefehl}" if self.unterbefehl else None
+        return finden.finde_kit(self.argument, self.arbeitsordner, self.home, self.befehl_im_chat, eigene, auswahl)
 
     def gewaehltes_kit(self) -> finden.Kit:
         return self.kit_aus_argument() if self.argument else self.kit_im_arbeitsordner()
@@ -91,19 +114,11 @@ class Aufruf:
 
     def lies_ein(self, kit: finden.Kit, ableitung: Path | None = None) -> Eingelesen:
         python = einrichtung.python_der_umgebung(self.paket, self.daten, self.home, sage)
-        with tempfile.TemporaryDirectory(prefix="atlas-kit-") as temp:
-            ziel = Path(temp) / "bauplan.json"
-            bericht = Path(temp) / "bericht.json"
-            befehl = [str(python), "-B", "-E", "-s", str(self.paket / SCANNER), str(kit.ordner), str(ziel),
-                      "--bericht", str(bericht)]
-            if ableitung is not None:
-                befehl += ["--ableitung", str(ableitung)]
-            lauf = subprocess.run(befehl, cwd=temp, stdin=subprocess.DEVNULL, capture_output=True,
-                                  text=True, encoding="utf-8", errors="replace")
-            if lauf.returncode != 0 or not ziel.is_file() or not bericht.is_file():
-                raise Abbruch([texte.einlesen_abgebrochen(erste_zeile(lauf.stderr, lauf.returncode)),
-                               texte.FEHLER_MELDEN])
-            return Eingelesen(ziel.read_bytes(), json.loads(bericht.read_text(encoding="utf-8")))
+        try:
+            inhalt, bericht = scanner_lauf.scanne(python, self.paket / SCANNER, kit.ordner, ableitung)
+        except scanner_lauf.ScanFehler as fehler:
+            raise Abbruch([texte.einlesen_abgebrochen(fehler.zeile), texte.FEHLER_MELDEN])
+        return Eingelesen(inhalt, bericht)
 
     def lies_mit_ableitung(self, kit: finden.Kit, ableitung: dict) -> Eingelesen:
         with tempfile.TemporaryDirectory(prefix="atlas-kit-ableitung-") as temp:
@@ -208,7 +223,9 @@ class Aufruf:
         ergebnis.schreibe_atomar(datei, html.encode("utf-8"))
         absolut = Path(os.path.realpath(datei))
         sage(texte.seite_gebaut(str(absolut)))
-        sage(texte.BROWSER_OFFEN if browser.oeffne(absolut) else texte.BROWSER_NICHT)
+        wie = browser.oeffne(absolut)
+        sage(texte.BROWSER_OFFEN if wie == browser.SICHER else texte.BROWSER_UNSICHER if wie == browser.UNSICHER
+             else texte.BROWSER_NICHT)
         befunde = atlas["befunde"]
         if befunde:
             sage(texte.befunde_auf_der_seite(len(befunde), ort_und_text(befunde[0])))
@@ -313,6 +330,14 @@ class Aufruf:
         return 0
 
     def fuehre_aus(self) -> int:
+        if self.befehl == WERKSTATT:
+            return werkstatt.fuehre_aus(self, sage, steuere)
+        if self.befehl == NEU:
+            return neues_kit.fuehre_aus(self, sage, steuere)
+        if self.befehl == "app":
+            return start.app(self, sage)
+        if self.befehl == "start":
+            return start.starte(self, sage)
         if self.befehl in ABLEITEN:
             return self.ableiten()
         if self.befehl == "antwort":
@@ -322,13 +347,7 @@ class Aufruf:
         return self.scan() if self.befehl == "scan" else self.render()
 
 
-def erste_zeile(stderr: str, exit_code: int) -> str:
-    zeilen = [z.strip() for z in stderr.splitlines() if z.strip()]
-    if not zeilen:
-        return f"Exit {exit_code}"
-    if zeilen[0].startswith("Traceback"):
-        return zeilen[-1]
-    return zeilen[0]
+erste_zeile = scanner_lauf.erste_zeile
 
 
 def _anzahl(atlas: dict, typ: str) -> int:
@@ -463,13 +482,16 @@ def fortschritt(lauf: ableiten.Lauf, zahlen: dict | None) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    argv = plattform.msys_zurueck(argv)  # Windows/Git Bash: '~/…' kommt umgeschrieben an (docs/windows.md Fund 31)
     for strom in (sys.stdout, sys.stderr):
         strom.reconfigure(encoding="utf-8", errors="replace")
     if not argv or argv[0] not in BEFEHLE:
         sage(AUFRUF)
         return 1
-    argument = finden.ohne_anfuehrungszeichen(argv[1]) if len(argv) > 1 else ""
-    aufruf = Aufruf(argv[0], argument)
+    # neu trennt Name und Ordner selbst und nimmt erst danach die Anführungszeichen je Teil weg (r21-10).
+    roh = argv[1] if len(argv) > 1 else ""
+    argument = roh if argv[0] == NEU else finden.ohne_anfuehrungszeichen(roh)
+    aufruf = Aufruf(argv[0], argument, argv[2:] if argv[0] in (WERKSTATT, NEU) else None)
     try:
         exit_code = aufruf.fuehre_aus()
     except (finden.KeinKit, einrichtung.EinrichtungFehler, Abbruch) as fehler:

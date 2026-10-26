@@ -39,20 +39,21 @@ def modul_docstring(kit: Path, datei: str, befunde: Befunde) -> Docstring | None
     try:
         quelltext = "\n".join(lies_zeilen(kit, datei))
     except UnicodeDecodeError:
-        befunde.melde("nicht_lesbar", f"{datei} ist nicht als UTF-8 lesbar", datei, None)
+        befunde.melde("nicht_lesbar", f"{datei} ist nicht als UTF-8 lesbar", datei, None, aussage="datei")
         return None
     except OSError as e:
         befunde.melde("nicht_lesbar", f"{datei} lässt sich nicht öffnen ({e.strerror})",
-                      datei, None)
+                      datei, None, aussage="datei")
         return None
     try:
         modul = ast.parse(quelltext, filename=datei)
     except SyntaxError as e:
         befunde.melde("nicht_lesbar", f"{datei} ist kein gültiges Python: {e.msg}",
-                      datei, e.lineno)
+                      datei, e.lineno, aussage="datei")
         return None
     except ValueError as e:
-        befunde.melde("nicht_lesbar", f"{datei} ist kein gültiges Python: {e}", datei, None)
+        befunde.melde("nicht_lesbar", f"{datei} ist kein gültiges Python: {e}", datei, None,
+                      aussage="datei")
         return None
 
     if not modul.body:

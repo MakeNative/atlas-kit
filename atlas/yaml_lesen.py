@@ -38,10 +38,11 @@ class Frontmatter:
     """Gelesenes Frontmatter einer Datei mit Zeilen je Schlüsselpfad."""
 
     def __init__(self, datei: str, werte: dict, positionen: dict, start: int, text_ab: int,
-                 zeilen: list[str], schluessel_oben: set):
+                 zeilen: list[str], schluessel_oben: set, ids: dict | None = None):
         self.datei = datei
         self.werte = werte
         self._positionen = positionen      # Pfad-Tupel -> Zeile in der Datei
+        self._ids = ids or {}              # Pfad eines Listeneintrags -> seine id (pfad_kennung)
         self.start = start                 # Zeile der ersten "---"
         self.text_ab = text_ab             # erste Zeile unterhalb des Frontmatters
         self.zeilen = zeilen               # alle Zeilen der Datei (textdatei.zerlege)
@@ -77,6 +78,10 @@ class Frontmatter:
         """True, wenn der Pfad existiert und sein Wert nicht null ist."""
         return self.hole(*schluessel) is not None
 
+    def kennung(self, pfad: tuple) -> str:
+        """Der Pfad als aussage eines Befunds (pfad_kennung)."""
+        return pfad_kennung(pfad, self._ids)
+
 
 def pfad_text(pfad: tuple) -> str:
     """("atlas", "schritte", 0, "titel") -> "atlas.schritte[1].titel" (Listen ab 1)."""
@@ -87,6 +92,29 @@ def pfad_text(pfad: tuple) -> str:
         else:
             teile += ("." if teile else "") + str(s)
     return teile
+
+
+def pfad_kennung(pfad: tuple, ids: dict) -> str:
+    """Wie pfad_text, aber ohne Index, der sich verschiebt, wenn davor ein Eintrag dazukommt: ein Listeneintrag mit id
+    heißt [id=<id>], einer ohne []. ("atlas", "schritte", 1, "titel") -> "atlas.schritte[id=s2].titel"."""
+    teile = ""
+    for n, s in enumerate(pfad):
+        if isinstance(s, int):
+            sid = ids.get(pfad[:n + 1])
+            teile += "[]" if sid is None else f"[id={sid}]"
+        else:
+            teile += ("." if teile else "") + str(s)
+    return teile
+
+
+def _id_von(node) -> str | None:
+    """Die id eines Listeneintrags: der Text unter dem einzigen Schlüssel id, sonst None."""
+    if not isinstance(node, yaml.MappingNode):
+        return None
+    werte = [v for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.tag == _STD + "str" and k.value == "id"]
+    if len(werte) != 1 or not isinstance(werte[0], yaml.ScalarNode) or werte[0].tag != _STD + "str":
+        return None
+    return werte[0].value
 
 
 def wert_text(wert) -> str:
@@ -129,6 +157,7 @@ class _Umwandler:
         self.datei = datei
         self.positionen: dict = {}
         self.schluessel_oben: set = set()
+        self.ids: dict = {}                 # Pfad eines Listeneintrags -> seine id (pfad_kennung)
         self._konstr = yaml.SafeLoader("")
 
     def _zeile(self, node) -> int:
@@ -145,6 +174,10 @@ class _Umwandler:
         if isinstance(node, yaml.SequenceNode):
             if node.tag != SEQ_TAG:
                 raise _tag_fehler(node.tag, zeile)
+            for i, kind in enumerate(node.value):
+                sid = _id_von(kind)
+                if sid is not None:
+                    self.ids[pfad + (i,)] = sid
             return [self.wandle(kind, pfad + (i,)) for i, kind in enumerate(node.value)]
         if isinstance(node, yaml.MappingNode):
             if node.tag != MAP_TAG:
@@ -171,7 +204,7 @@ class _Umwandler:
                     "widerspruch",
                     f"Der Schlüssel {pfad_text(pfad + (schluessel,))} steht doppelt (Zeilen "
                     f"{erste_zeile[schluessel]} und {k_zeile}); keiner der Werte wird übernommen",
-                    self.datei, k_zeile)
+                    self.datei, k_zeile, aussage=pfad_kennung(pfad + (schluessel,), self.ids))
                 doppelt.add(schluessel)
                 continue
             erste_zeile[schluessel] = k_zeile
@@ -188,11 +221,11 @@ def lies_frontmatter(kit: Path, datei: str, befunde: Befunde) -> Frontmatter | N
         zeilen = lies_zeilen(kit, datei)
     except UnicodeDecodeError:
         befunde.melde("nicht_lesbar", f"{datei} ist nicht als UTF-8 lesbar; "
-                                      f"das Frontmatter wird nicht gelesen", datei, None)
+                                      f"das Frontmatter wird nicht gelesen", datei, None, aussage="datei")
         return None
     except OSError as e:
         befunde.melde("nicht_lesbar", f"{datei} lässt sich nicht öffnen ({e.strerror})",
-                      datei, None)
+                      datei, None, aussage="datei")
         return None
     grenzen = _trenne(zeilen)
     if grenzen is None:
@@ -200,7 +233,7 @@ def lies_frontmatter(kit: Path, datei: str, befunde: Befunde) -> Frontmatter | N
             grund = "die erste Zeile ist nicht '---'"
         else:
             grund = "die schließende Zeile '---' fehlt"
-        befunde.melde("nicht_lesbar", f"Frontmatter nicht lesbar: {grund}", datei, 1)
+        befunde.melde("nicht_lesbar", f"Frontmatter nicht lesbar: {grund}", datei, 1, aussage="frontmatter")
         return None
     anfang, ende = grenzen
     versatz = anfang + 2      # YAML-Zeile 0 = Dateizeile anfang + 2
@@ -212,11 +245,11 @@ def lies_frontmatter(kit: Path, datei: str, befunde: Befunde) -> Frontmatter | N
         zeile = marke.line + versatz if marke is not None else None
         grund = e.problem or e.context or "YAML-Fehler"
         befunde.melde("nicht_lesbar", f"Frontmatter nicht lesbar: YAML-Fehler '{grund}'",
-                      datei, zeile)
+                      datei, zeile, aussage="frontmatter")
         return None
     except yaml.YAMLError as e:
         befunde.melde("nicht_lesbar", f"Frontmatter nicht lesbar: YAML-Fehler '{e}'",
-                      datei, None)
+                      datei, None, aussage="frontmatter")
         return None
 
     umwandler = _Umwandler(versatz, befunde, datei)
@@ -226,20 +259,20 @@ def lies_frontmatter(kit: Path, datei: str, befunde: Befunde) -> Frontmatter | N
         try:
             werte = umwandler.wandle(wurzel)
         except _NichtLesbar as e:
-            befunde.melde("nicht_lesbar", e.text, datei, e.zeile)
+            befunde.melde("nicht_lesbar", e.text, datei, e.zeile, aussage="frontmatter")
             return None
         except yaml.YAMLError as e:
             befunde.melde("nicht_lesbar", f"Frontmatter nicht lesbar: YAML-Fehler '{e}'",
-                          datei, wurzel.start_mark.line + versatz)
+                          datei, wurzel.start_mark.line + versatz, aussage="frontmatter")
             return None
         if not isinstance(werte, dict):
             befunde.melde("nicht_lesbar",
                           f"Frontmatter nicht lesbar: es ist keine Abbildung, sondern "
                           f"{'eine Liste' if isinstance(werte, list) else 'ein einzelner Wert'}",
-                          datei, wurzel.start_mark.line + versatz)
+                          datei, wurzel.start_mark.line + versatz, aussage="frontmatter")
             return None
     return Frontmatter(datei, werte, umwandler.positionen, anfang + 1, ende + 2,
-                       zeilen, umwandler.schluessel_oben)
+                       zeilen, umwandler.schluessel_oben, umwandler.ids)
 
 
 # ---------------------------------------------------------------- Typprüfung (SC-Y6)
@@ -248,7 +281,7 @@ def _form_falsch(fm: Frontmatter, pfad: tuple, erwartet: str, wert, befunde: Bef
                  folge: str) -> None:
     befunde.melde("nicht_unterstuetzt",
                   f"{pfad_text(pfad)}: erwartet {erwartet}, gefunden {wert_text(wert)}; {folge}",
-                  fm.datei, fm.zeile(*pfad))
+                  fm.datei, fm.zeile(*pfad), aussage=fm.kennung(pfad))
 
 
 def text_feld(fm: Frontmatter, pfad: tuple, befunde: Befunde) -> str | None:

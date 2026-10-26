@@ -51,14 +51,14 @@ def _lies_hooks_json(quelle: Ordner, befunde: Befunde) -> dict | None:
     if not pfad.is_file():
         return None
     try:
-        daten = json.loads(pfad.read_text(encoding="utf-8"))
+        daten = json.loads(pfad.read_text(encoding="utf-8-sig"))
     except UnicodeDecodeError:
         befunde.melde("nicht_lesbar", f"{datei} ist nicht als UTF-8 lesbar; keine Hooks",
-                      datei, None)
+                      datei, None, aussage="datei")
         return None
     except json.JSONDecodeError as e:
         befunde.melde("nicht_lesbar", f"{datei} ist kein gültiges JSON ({e.msg}); keine Hooks",
-                      datei, e.lineno)
+                      datei, e.lineno, aussage="datei")
         return None
     if quelle.ist_projekt and isinstance(daten, dict) and "hooks" not in daten:
         return None
@@ -66,7 +66,7 @@ def _lies_hooks_json(quelle: Ordner, befunde: Befunde) -> dict | None:
         befunde.melde("nicht_lesbar",
                       f"{datei} hat nicht die erwartete Form "
                       f"{{\"hooks\": {{<Ereignis>: [{{\"hooks\": [...]}}]}}}}; keine Hooks",
-                      datei, None)
+                      datei, None, aussage="hooks")
         return None
     return daten
 
@@ -91,14 +91,15 @@ def _eintraege(daten: dict, quelle: Ordner, befunde: Befunde) -> list[dict]:
             if matcher is not None and not isinstance(matcher, str):
                 befunde.melde("nicht_unterstuetzt",
                               f"matcher unter {ereignis} ist kein Text ({matcher!r}); wird null",
-                              datei, None)
+                              datei, None, aussage=f"hooks.{ereignis}.matcher")
                 matcher = None
             for h in gruppe["hooks"]:
                 if h.get("type") != "command":
                     befunde.melde("nicht_unterstuetzt",
                                   f"Hook unter {ereignis} hat type {h.get('type')}; gelesen wird "
                                   f"nur type command, kein Knoten",
-                                  datei, None)
+                                  datei, None, aussage=f"hooks.{ereignis}.type", ziel_art="type",
+                                  ziel=str(h.get("type")))
                     continue
                 command = h.get("command")
                 skript = _skript(command, quelle)
@@ -106,7 +107,8 @@ def _eintraege(daten: dict, quelle: Ordner, befunde: Befunde) -> list[dict]:
                     befunde.melde("nicht_unterstuetzt",
                                   f"Hook unter {ereignis}: command \"{command}\" nennt kein Skript "
                                   f"unter {WURZEL_IM_COMMAND[quelle.art]}; Knoten ohne skript und bewacht",
-                                  datei, None)
+                                  datei, None, aussage=f"hooks.{ereignis}.command", ziel_art="command",
+                                  ziel=str(command))
                 name = posixpath.splitext(posixpath.basename(skript))[0] if skript else ereignis
                 eintraege.append({"ereignis": ereignis, "matcher": matcher,
                                   "skript": skript, "name": name})
@@ -159,7 +161,8 @@ def _docstring(kit: Path, skript: str, cache: dict, befunde: Befunde) -> Docstri
         doc = modul_docstring(kit, skript, befunde)
         if doc is not None and not doc.vorhanden:
             befunde.melde("pflichtfeld_fehlt",
-                          f"{skript} hat keinen Modul-Docstring; bewacht bleibt null", skript, None)
+                          f"{skript} hat keinen Modul-Docstring; bewacht bleibt null", skript, None,
+                          aussage="docstring")
         cache[skript] = doc
     return cache[skript]
 
@@ -182,7 +185,7 @@ def _hook_knoten(quelle: Ordner, e: dict, hook_id: str, ereignisse: set[str], ca
         befunde.melde("verweis_fehlt",
                       f"Hook unter {e['ereignis']} verweist auf {skript}, das es {ORT[quelle.art]} "
                       f"nicht gibt; Knoten ohne bewacht",
-                      quelle.hooks, None)
+                      quelle.hooks, None, aussage=f"hooks.{e['ereignis']}.command", ziel_art="skript", ziel=skript)
         return {**k, "herkunft": "scan", "pfade": []}, []
     doc = _docstring(kit, skript, cache, befunde)
     erste = doc.erste_zeile() if doc is not None else None
@@ -195,7 +198,7 @@ def _hook_knoten(quelle: Ordner, e: dict, hook_id: str, ereignisse: set[str], ca
         befunde.melde("widerspruch",
                       f"Der Docstring von {skript} beginnt mit {m.group(1)}, registriert ist "
                       f"das Skript unter {e['ereignis']}",
-                      skript, zeile)
+                      skript, zeile, aussage="docstring", ziel_art="ereignis", ziel=e["ereignis"])
     bewacht = erster_absatz(doc)
     if bewacht.startswith(f"{e['ereignis']}: "):
         bewacht = bewacht[len(e["ereignis"]) + 2:]
@@ -227,3 +230,18 @@ def lies_hooks(quelle: Ordner, befunde: Befunde) -> tuple[list[dict], list[dict]
         knoten.append(k)
         kanten.extend(ks)
     return knoten, kanten
+
+
+def skripte(quelle: Ordner) -> list[str]:
+    """Hook-Skripte, die der Scanner liest (im Kit vorhanden), relativ zur Wurzel und sortiert.
+
+    Öffentlich für die Werkstatt: Ihre Probe-Kopie enthält genau das, was der Scanner liest
+    (Ordner.dateien() und diese Skripte). Befunde entstehen hier keine.
+    """
+    befunde = Befunde()
+    daten = _lies_hooks_json(quelle, befunde)
+    if daten is None:
+        return []
+    gefunden = {e["skript"] for e in _eintraege(daten, quelle, befunde)
+                if e.get("skript") and _skript_im_kit(quelle.wurzel, e["skript"])}
+    return sorted(gefunden)

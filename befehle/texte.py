@@ -35,6 +35,8 @@ MEHRERE_BAUPLAENE = "In atlas-kit/ liegen Baupläne mehrerer Kits. Nenn eines:"
 NEU_EINLESEN = "Lies das Kit mit /atlas:scan neu ein."
 BROWSER_OFFEN = "Im Browser geöffnet."
 BROWSER_NICHT = "Der Browser hat sich nicht von selbst geöffnet. Öffne die Datei per Doppelklick."
+BROWSER_UNSICHER = ("Die Seite ist mit dem Programm für HTML-Dateien geöffnet; ob das ein Browser ist, ließ sich nicht "
+                    "prüfen. Steht sie nicht im Browser, öffne die Datei dort selbst.")
 VERWENDET_OHNE_DATUM = "Verwendet den vorhandenen Bauplan. Nach Änderungen am Kit zuerst /atlas:scan."
 DAUERT = "Das dauert je nach Größe einige Minuten."
 ABLEITUNG_WEITER = "/atlas:analyse leitet neu ab."
@@ -197,3 +199,170 @@ def ableitung_kaputt(name: str) -> str:
 def kein_lauf(pfad: str) -> str:
     return (f"{pfad} ist kein Arbeitsordner einer laufenden Ableitung von atlas-kit. "
             f"Ruf {ANALYSE} oder {INIT} noch einmal auf.")
+
+
+WERKSTATT_NUR_LESEN = ("Dieses Kit ist eine installierte Kopie und wird nur gelesen. Öffne den Quellordner des Kits mit "
+                       "/atlas:werkstatt <ordner>, um es zu bearbeiten.")
+WERKSTATT_BROWSER_NICHT = ("Der Browser hat sich nicht von selbst geöffnet. Öffne die Werkstatt mit "
+                           "/atlas:werkstatt oeffnen bzw. `bin/atlas-kit werkstatt oeffnen`, sobald ein Browser bereitsteht.")
+WERKSTATT_BROWSER_UNSICHER = ("Die Werkstatt ist mit dem Programm für HTML-Dateien geöffnet; ob das ein Browser ist, "
+                              "ließ sich nicht prüfen. Steht sie nicht im Browser, öffne sie mit /atlas:werkstatt oeffnen.")
+KEINE_WERKSTATT = "Es läuft keine Werkstatt."
+
+
+# WS-K9, WS-KE8: die beiden festen Sätze der Werkstatt-Sitzung stehen in der Ausgabe der Befehle, damit sie auch dann
+# im Chat sind, wenn Claude zwischen zwei Befehlen nichts schreibt (Probelauf Ticket 17 mit claude -p).
+WERKSTATT_WARTET = ("Die Werkstatt wartet jetzt auf Aufträge aus der Seite. Mit Esc unterbrichst du hier, mit "
+                    "„Werkstatt beenden“ in der Seite ist sie zu Ende.")
+WERKSTATT_SITZUNG_ENDE = "Die Werkstatt-Sitzung ist zu Ende."
+
+
+def werkstatt_laeuft(kit_id: str) -> str:
+    return f"Werkstatt für {kit_id} läuft."
+
+
+def werkstatt_laeuft_schon(kit_id: str) -> str:
+    return f"Werkstatt für {kit_id} läuft schon."
+
+
+def werkstatt_antwortet_nicht(kit_id: str) -> str:
+    return (f"Die Werkstatt für {kit_id} läuft schon, antwortet aber gerade nicht. Versuch es gleich noch einmal; mit "
+            f"/atlas:werkstatt stopp beendest du sie.")
+
+
+def werkstatt_offen(kit_id: str) -> str:
+    return f"Werkstatt für {kit_id}:"
+
+
+def werkstatt_nicht_gestartet(grund: str) -> str:
+    return f"Die Werkstatt ließ sich nicht starten: {grund}"
+
+
+def werkstatt_laeuft_noch(kit_id: str, pid: int) -> str:
+    return f"Die Werkstatt für {kit_id} (Prozess {pid}) hat sich nicht beenden lassen und läuft noch."
+
+
+def werkstatt_beendet(anzahl: int) -> str:
+    return f"Werkstatt beendet: {anzahl}"
+
+
+def werkstatt_fuer_beendet(kit_id: str) -> str:
+    return f"Werkstatt für {kit_id} beendet."
+
+
+def keine_werkstatt_fuer(kit_id: str) -> str:
+    return f"Für {kit_id} läuft keine Werkstatt."
+
+
+WERKSTATT_STOPP_OHNE_KIT = ("Im Arbeitsordner ist kein Kit. Nenne es: /atlas:werkstatt stopp <ordner | kit-name>; "
+                            "alle Werkstätten beendet /atlas:werkstatt stopp --alle.")
+
+
+def werkstatt_nicht_schreibbar(pfad: str) -> str:
+    return (f"In {pfad} kann die Werkstatt nicht schreiben. Prüf die Rechte des Ordners oder starte die Werkstatt "
+            f"in einem Ordner, in dem du schreiben darfst.")
+
+
+def werkstatt_kit_nicht_schreibbar(pfad: str) -> str:
+    return f"In {pfad} kann die Werkstatt nicht schreiben. Prüf die Rechte des Kit-Ordners."
+
+
+def alter_verlauf_im_chat(ort: str) -> str:
+    return (f"Ein älterer Verlauf der Werkstatt liegt noch in {ort}/atlas-kit/werkstatt. Die Seite bietet dir an, ihn "
+            f"zu übernehmen.")
+
+
+def alter_verlauf_uebernommen(ort: str) -> str:
+    return (f"Übernommen. Der alte Ordner {ort}/atlas-kit/werkstatt bleibt liegen; du kannst ihn löschen, wenn du ihn "
+            f"nicht mehr brauchst.")
+
+
+def eigener_verlauf(ort: str) -> str:
+    return (f"Die Werkstatt hat für dieses Kit schon einen eigenen Verlauf. Zwei Verläufe lassen sich nicht "
+            f"zusammenführen; der ältere bleibt in {ort}.")
+
+
+def alter_verlauf_kaputt(grund: str) -> str:
+    return f"Der ältere Verlauf ließ sich nicht übernehmen: {grund}"
+
+
+KEIN_ALTER_VERLAUF = "Es gibt keinen älteren Verlauf."
+
+
+def werkstatt_link_unsicher(datei: str) -> str:
+    return (f"Die Werkstatt ist mit dem Programm für HTML-Dateien geöffnet; ob das ein Browser ist, ließ sich nicht "
+            f"prüfen. Steht sie nicht im Browser, öffne den Link aus {datei} dort selbst; er gilt einmal und 10 Minuten.")
+
+
+def werkstatt_link_in_datei(datei: str) -> str:
+    return (f"Der Browser hat sich nicht von selbst geöffnet. Öffne den Link aus {datei} selbst im Browser; er gilt "
+            f"einmal und 10 Minuten. /atlas:werkstatt oeffnen macht einen neuen.")
+
+
+# ------------------------------------------------------------ neues Kit und Öffnen (Ticket 21, WS-NK)
+
+NEU_OHNE_NAME = "Nenn den Namen des neuen Kits, z. B. /atlas:neu mein-kit oder /atlas:neu mein-kit ~/kits."
+NEU_GIT_OK = "Mit eigenem git-Repo und erstem Commit; „Speichern“ in der Werkstatt legt weitere Commits an."
+NEU_GIT_FEHLT = ("git fehlt auf diesem Rechner: Das Kit liegt ohne Repo. Die Werkstatt schreibt deine Änderungen "
+                 "trotzdem in die Dateien, nur „Speichern“ als Commit geht nicht.")
+NEU_NENNEN = "Ein neues Kit legst du mit /atlas:neu <name> an."
+KNOPF_NUR_MAC_WINDOWS = "Die Datei zum Doppelklicken gibt es nur auf macOS und Windows."
+
+
+def neu_ungueltig(name: str) -> str:
+    return (f"„{name}“ geht nicht als Name eines Kits: nur Kleinbuchstaben, Ziffern und einzelne Bindestriche, vorne "
+            f"ein Buchstabe, höchstens 64 Zeichen, z. B. mein-kit.")
+
+
+def neu_ordner_fehlt(pfad: str) -> str:
+    return f"Den Ordner {pfad} gibt es nicht. Leg ihn zuerst an oder nenn einen anderen."
+
+
+def neu_schon_da(ziel: str) -> str:
+    return (f"In {ziel} liegt schon etwas. atlas-kit überschreibt nichts: Nimm einen anderen Namen oder Ordner. "
+            f"Ein vorhandenes Kit öffnest du mit /atlas:werkstatt {ziel}.")
+
+
+def neu_angelegt(name: str, ziel: str) -> str:
+    return f"Neues Kit {name} angelegt in {ziel}."
+
+
+def neu_ohne_commit(grund: str) -> str:
+    return (f"Das git-Repo ist angelegt, aber der erste Commit ging nicht ({grund}). Die Werkstatt geht trotzdem; "
+            f"„Speichern“ klappt, sobald git deinen Namen und deine E-Mail kennt.")
+
+
+def wieder_oeffnen(ziel: str, knopf: str | None) -> str:
+    vorn = f"Doppelklick auf „{knopf}“ im Kit-Ordner oder " if knopf else ""
+    return f"Wieder öffnen: {vorn}/atlas:werkstatt {ziel}."
+
+
+def knopf_angelegt(datei: str, kit: str) -> str:
+    return (f"Doppelklick auf „{datei}“ in {kit} öffnet die Werkstatt: Das Terminal startet dort Claude Code mit "
+            f"/atlas:werkstatt.")
+
+
+def knopf_schon_da(datei: str, kit: str) -> str:
+    return f"„{datei}“ liegt schon in {kit} und bleibt, wie sie ist."
+
+
+def knopf_fremd(datei: str, kit: str) -> str:
+    return (f"„{datei}“ liegt schon in {kit}, ist aber nicht von atlas-kit. Sieh sie dir an, bevor du sie doppelt "
+            f"anklickst, oder lösch sie und ruf /atlas:werkstatt knopf noch einmal auf.")
+
+
+def knopf_aelter(datei: str, kit: str) -> str:
+    return (f"„{datei}“ in {kit} ist eine ältere Fassung von atlas-kit. Lösch sie und ruf /atlas:werkstatt knopf noch "
+            f"einmal auf, dann kommt die neue.")
+
+
+def zuletzt_kopf(pfad: str) -> str:
+    return f"Im Arbeitsordner {pfad} ist kein Kit. Zuletzt in der Werkstatt geöffnet:"
+
+
+def zuletzt_eintrag(kit_id: str, pfad: str) -> str:
+    return f"{kit_id}: /atlas:werkstatt {pfad}"
+
+
+def mehrere_kits(name: str) -> str:
+    return f"Mehrere Kits heißen {name}. Nenn eines:"

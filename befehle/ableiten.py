@@ -19,7 +19,7 @@ LAUF_DATEI = "lauf.json"
 QUELLEN = "quellen"
 STEUER = "@atlas "
 ROLLEN_PAKET = "rollen"
-JSON_BLOCK = re.compile(r"```json[ \t]*\r?\n(.*?)```", re.S)
+JSON_ANFANG = re.compile(r"```json[ \t]*\r?\n")
 STEUERZEICHEN_KATEGORIEN = ("Cc", "Cf", "Zl", "Zp")
 ZUSTAND_FELDER = {"lauf": str, "befehl": str, "kit": dict, "name": str, "namen": dict, "eigene_schritte": list,
                   "dateien": dict, "pakete": list, "nr": int, "versuch": int, "offen": dict, "skills": dict,
@@ -36,6 +36,12 @@ class AbleitungKaputt(Exception):
 
 def ist_steuerzeichen(zeichen: str) -> bool:
     return unicodedata.category(zeichen) in STEUERZEICHEN_KATEGORIEN
+
+
+def einzeilig(text: object, hoechstens: int = 300) -> str:
+    """Eine Zeile ohne Steuerzeichen, gekürzt mit „…“; für Meldungen, die Seite und Chat zeigen."""
+    zeile = " ".join("".join(" " if ist_steuerzeichen(z) else z for z in str(text)).split())
+    return zeile if len(zeile) <= hoechstens else zeile[:hoechstens - 1] + "…"
 
 
 def maskiere(text: str) -> str:
@@ -116,13 +122,28 @@ def pakete(skills: list[str], agenten: list[str]) -> list[dict]:
     return liste
 
 
-def json_block(text: str) -> object | None:
-    treffer = JSON_BLOCK.search(text)
-    roh = treffer.group(1) if treffer else text.strip()
+def _lade(roh: str) -> object | None:
     try:
         return json.loads(roh)
     except (ValueError, RecursionError):
         return None
+
+
+def json_block(text: str) -> object | None:
+    """Erster ```json-Block, sonst der ganze Text. Der Block wird einmal von seinem Anfang an gelesen (raw_decode) und
+    gilt, wenn danach nur Leerraum und das schließende ``` folgen; so darf der JSON-Inhalt selbst ``` enthalten (etwa
+    einen Codeblock in einem Zitat aus Markdown), und die Laufzeit bleibt linear."""
+    treffer = JSON_ANFANG.search(text)
+    if not treffer:
+        return _lade(text.strip())
+    anfang = treffer.end()
+    while anfang < len(text) and text[anfang] in " \t\r\n":
+        anfang += 1
+    try:
+        daten, ende = json.JSONDecoder().raw_decode(text, anfang)
+    except (ValueError, RecursionError):
+        return None
+    return daten if text[ende:].lstrip(" \t\r\n").startswith("```") else None
 
 
 def _skill_lesbar(eintrag: object) -> bool:

@@ -3,8 +3,9 @@ MINDEST_MAJOR=3
 MINDEST_MINOR=9
 MINDEST="$MINDEST_MAJOR.$MINDEST_MINOR"
 
+# Unter Windows (Git Bash) kommt der Pfad aus CLAUDE_PLUGIN_ROOT oft mit Backslashes: C:\…\bin\atlas-kit.
 case "$0" in
-  */*) bin_ordner=${0%/*} ;;
+  */*|*\\*) bin_ordner=${0%[/\\]*} ;;
   *) bin_ordner=. ;;
 esac
 wurzel="$bin_ordner/.."
@@ -14,23 +15,72 @@ melde_python() {
   exit 1
 }
 
-py=""
-for kandidat in python3 python; do
-  if command -v "$kandidat" >/dev/null 2>&1; then
-    py=$kandidat
-    break
+# Eine Suche für alle Plattformen: alle python3/python im PATH der Reihe nach, danach der Starter py -3 (Windows).
+# Ein Kandidat zählt nur, wenn er läuft und eine Version ab $MINDEST meldet. Übersprungen werden Platzhalter:
+# /usr/bin/python3 auf macOS ohne Command Line Tools (öffnet einen Installationsdialog) und unter Windows python3/python
+# aus dem Microsoft Store ohne installiertes Python (meldet sich ohne Version, Exit 9009).
+platzhalter() {
+  [ "$1" = /usr/bin/python3 ] || return 1
+  [ "$(uname -s 2>/dev/null)" = Darwin ] || return 1
+  if command -v xcode-select >/dev/null 2>&1 && xcode-select -p >/dev/null 2>&1; then
+    return 1
   fi
-done
-[ -n "$py" ] || melde_python "keins"
+  return 0
+}
 
-version=$("$py" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
-major=${version%%.*}
-minor=${version#*.}
-case "$major.$minor" in
-  *[!0-9.]*|.*|*.) melde_python "keins" ;;
-esac
-if [ "$major" -lt "$MINDEST_MAJOR" ] || { [ "$major" -eq "$MINDEST_MAJOR" ] && [ "$minor" -lt "$MINDEST_MINOR" ]; }; then
-  melde_python "Python $version"
+py=""
+gefunden="keins"
+
+pruefe() {
+  version=$("$@" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+  major=${version%%.*}
+  minor=${version#*.}
+  case "$major.$minor" in
+    *[!0-9.]*|.*|*.) return 1 ;;
+  esac
+  if [ "$major" -lt "$MINDEST_MAJOR" ] || { [ "$major" -eq "$MINDEST_MAJOR" ] && [ "$minor" -lt "$MINDEST_MINOR" ]; }; then
+    [ "$gefunden" = "keins" ] && gefunden="Python $version"
+    return 1
+  fi
+  return 0
+}
+
+alt_ifs=$IFS
+IFS=:
+set -f
+for ordner in $PATH; do
+  for name in python3 python; do
+    kandidat="${ordner:-.}"
+    while [ "$kandidat" != "/" ] && [ "${kandidat%/}" != "$kandidat" ]; do kandidat=${kandidat%/}; done
+    kandidat="$kandidat/$name"
+    [ -f "$kandidat" ] && [ -x "$kandidat" ] || continue
+    platzhalter "$kandidat" && continue
+    if pruefe "$kandidat"; then
+      py=$kandidat
+      break 2
+    fi
+  done
+done
+set +f
+IFS=$alt_ifs
+if [ -z "$py" ] && command -v py >/dev/null 2>&1 && pruefe py -3; then
+  py="py -3"
+fi
+[ -n "$py" ] || melde_python "$gefunden"
+
+skript="$wurzel/befehle/atlas_kit.py"
+# Git Bash (MSYS) schreibt Argumente beim Start von python.exe um: aus '~/mein kit' wird '~C:/Program Files/Git/mein kit'.
+# Abschalten lässt sich das nicht, ohne dass auch die Umgebung (USERPROFILE, TEMP, PATH) in /c/…-Form bliebe (im CI
+# gesehen, mit MSYS_NO_PATHCONV und MSYS2_ARG_CONV_EXCL). Deshalb bekommt Python die Wurzel von MSYS mit und nimmt
+# genau diese Umschreibung zurück (plattform.msys_zurueck). Den eigenen Skriptpfad schreibt cygpath in Windows-Form.
+if command -v cygpath >/dev/null 2>&1; then
+  skript=$(cygpath -w "$skript")
+  ATLAS_MSYS_WURZEL=$(cygpath -m /)
+  export ATLAS_MSYS_WURZEL
 fi
 
-exec "$py" -B -E -s "$wurzel/befehle/atlas_kit.py" "$@"
+# -X utf8: Ausgaben und Dateien in UTF-8, auch wenn die Konsole unter Windows cp1252/cp850 hat.
+if [ "$py" = "py -3" ]; then
+  exec py -3 -X utf8 -B -E -s "$skript" "$@"
+fi
+exec "$py" -X utf8 -B -E -s "$skript" "$@"

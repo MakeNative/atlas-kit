@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Atlas Werkstatt</title>
+<style>
+/*schrift*/@font-face{font-family:"Instrument Sans";font-style:normal;font-weight:400 700;font-display:swap;src:url(__ATLAS_SCHRIFT__) format("woff2")}/*schrift-ende*/
+:root{
+  color-scheme:light;
+  --seite:#ffffff;--flaeche:#ffffff;--canvas:#fafafa;--raster:#d4d4d4;
+  --tinte:#0a0a0a;--leise:#5a5a5a;--linie:#ededed;--linie-stark:#d4d4d4;--chip:#f5f5f5;
+  --akzent:#227469;--akzent-hover:#1c6359;--tuerkis:#36bfad;--akzent-zart:#e6f1ef;--auf-akzent:#ffffff;
+  --gefahr:#b4372b;--gefahr-zart:#fbecea;--mensch-text:#a14a06;--mensch-zart:#fdf3e4;
+  --schatten-erhoben:0 2px 8px 0 rgba(10,10,10,.08);
+  --sans:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  --kurve:cubic-bezier(.22,1,.36,1);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --seite:#0a0a0a;--flaeche:#171717;--canvas:#111111;--raster:#2a2a2a;
+    --tinte:#fafafa;--leise:#a1a1a1;--linie:#242424;--linie-stark:#333333;--chip:#242424;
+    --akzent:#36bfad;--akzent-hover:#5fd0c1;--tuerkis:#36bfad;--akzent-zart:#11302b;--auf-akzent:#0a0a0a;
+    --gefahr:#f08a7e;--gefahr-zart:#2c1714;--mensch-text:#f5b04d;--mensch-zart:#2e2416;
+    --schatten-erhoben:0 2px 8px 0 rgba(0,0,0,.45);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --seite:#0a0a0a;--flaeche:#171717;--canvas:#111111;--raster:#2a2a2a;
+  --tinte:#fafafa;--leise:#a1a1a1;--linie:#242424;--linie-stark:#333333;--chip:#242424;
+  --akzent:#36bfad;--akzent-hover:#5fd0c1;--tuerkis:#36bfad;--akzent-zart:#11302b;--auf-akzent:#0a0a0a;
+  --gefahr:#f08a7e;--gefahr-zart:#2c1714;--mensch-text:#f5b04d;--mensch-zart:#2e2416;
+  --schatten-erhoben:0 2px 8px 0 rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--canvas);
+  background-image:radial-gradient(var(--raster) 1px,transparent 1px);
+  background-size:24px 24px;
+  color:var(--tinte);font-family:var(--sans);font-size:16px;line-height:1.5;
+  min-height:100vh;-webkit-font-smoothing:antialiased;
+}
+main{max-width:1040px;margin:0 auto;padding:56px 24px 40px}
+.kopf{max-width:640px;margin-bottom:32px}
+.marke{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:var(--leise);
+  letter-spacing:.02em;margin:0 0 12px}
+.marke i{width:10px;height:10px;border-radius:999px;background:linear-gradient(135deg,#2a8174,#36bfad);display:block}
+h1{font-size:40px;line-height:1.1;font-weight:600;letter-spacing:-.025em;margin:0 0 12px}
+.lead{font-size:18px;color:var(--leise);margin:0}
+.hinweis{display:flex;gap:12px;align-items:flex-start;margin:20px 0 0;padding:14px 16px;border-radius:12px;
+  background:var(--flaeche);border:1px solid var(--linie);font-size:15px}
+.hinweis .zeichen{flex:none;width:22px;height:22px;border-radius:6px;background:var(--akzent-zart);color:var(--akzent);
+  font-family:var(--mono);font-size:12px;font-weight:600;display:grid;place-items:center;margin-top:1px}
+.warnung{margin:0 0 24px;padding:16px 18px;border-radius:12px;background:var(--mensch-zart);color:var(--tinte);
+  border:1px solid var(--linie-stark);font-size:15px}
+.warnung strong{color:var(--mensch-text);font-weight:600}
+.raster{display:grid;grid-template-columns:1fr;gap:20px}
+@media (min-width:860px){.raster{grid-template-columns:1fr 1fr}}
+.karte{background:var(--flaeche);border:1px solid var(--linie);border-radius:12px;padding:24px;min-width:0}
+.karte h2{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:0 0 4px}
+.karte .unter{color:var(--leise);font-size:15px;margin:0 0 20px}
+label{display:block;font-size:14px;font-weight:500;margin:0 0 6px}
+input[type=text]{width:100%;font:inherit;font-size:16px;color:var(--tinte);background:var(--seite);
+  border:1px solid var(--linie-stark);border-radius:8px;padding:10px 12px;outline:none;
+  transition:border-color .15s var(--kurve)}
+input[type=text]:hover{border-color:var(--tuerkis)}
+input[type=text]:focus-visible{border-color:var(--akzent);box-shadow:0 0 0 3px var(--akzent-zart)}
+.feldhilfe{font-size:13px;color:var(--leise);margin:6px 0 18px}
+.ort{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border-radius:8px;background:var(--chip);
+  margin-bottom:20px}
+.ort code{font-family:var(--mono);font-size:14px;overflow-wrap:anywhere;flex:1 1 180px;min-width:0}
+button{font:inherit;font-weight:500;cursor:pointer;border-radius:14px;padding:11px 18px;font-size:15px;
+  border:1px solid transparent;transition:background-color .15s var(--kurve),border-color .15s var(--kurve),transform .1s}
+button:active:not(:disabled){transform:scale(.98)}
+button:focus-visible,a:focus-visible,.kit:focus-visible{outline:2px solid var(--akzent);outline-offset:2px}
+button:disabled,button:disabled:hover{cursor:not-allowed;background:var(--chip);color:var(--leise);border-color:var(--linie)}
+input:disabled{background:var(--chip);color:var(--leise);cursor:not-allowed}
+.haupt{background:var(--akzent);color:var(--auf-akzent)}
+.haupt:hover:not(:disabled){background:var(--akzent-hover)}
+.rand{background:var(--flaeche);color:var(--tinte);border-color:var(--linie-stark)}
+.rand:hover:not(:disabled){border-color:var(--tuerkis)}
+.klein{border-radius:10px;padding:7px 12px;font-size:14px}
+.liste{list-style:none;margin:0 0 20px;padding:0;display:grid;gap:8px}
+.kit{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;border-radius:8px;
+  padding:12px 14px;background:var(--seite);border:1px solid var(--linie);color:var(--tinte)}
+.kit:hover:not(:disabled){border-color:var(--tuerkis)}
+.kit strong{font-weight:600;font-size:16px}
+.kit span{font-family:var(--mono);font-size:13px;color:var(--leise);overflow-wrap:anywhere}
+.leer{color:var(--leise);font-size:15px;margin:0 0 20px;padding:16px;border:1px dashed var(--linie-stark);border-radius:8px}
+.meldung{font-size:15px;margin:16px 0 0;padding:12px 14px;border-radius:8px}
+.meldung:empty{display:none}
+.meldung[data-art="fehler"]{background:var(--gefahr-zart);color:var(--gefahr)}
+.meldung[data-art="ok"]{background:var(--akzent-zart);color:var(--tinte)}
+.ende{margin:32px 0 0;padding:16px 18px;border-radius:12px;background:var(--flaeche);border:1px solid var(--linie-stark)}
+.ende[hidden]{display:none}
+footer{max-width:1040px;margin:0 auto;padding:0 24px 40px;color:var(--leise);font-size:13px}
+@media (max-width:520px){main{padding:32px 16px 28px}footer{padding:0 16px 28px}h1{font-size:32px}.karte{padding:20px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <header class="kopf">
+    <p class="marke"><i aria-hidden="true"></i>atlas-kit</p>
+    <h1>Atlas Werkstatt</h1>
+    <p class="lead">Leg ein neues Kit an oder öffne eines, das du schon hast. Die Werkstatt zeigt dir seine Abläufe, und du baust sie dort um.</p>
+    <p class="hinweis" data-start="terminal-satz"><span class="zeichen" aria-hidden="true">&gt;_</span><span>Beim Öffnen geht zusätzlich ein Terminal-Fenster mit Claude auf. Lass es offen: Dort arbeitet die KI für dich und fragt dich, bevor sie etwas ändert, so wie es in Claude Code eingestellt ist.</span></p>
+  </header>
+
+  <div class="warnung" data-start="claude-fehlt" hidden><strong>Claude Code fehlt auf diesem Rechner.</strong> Die Werkstatt braucht es für die Arbeit der KI. Installier es von claude.com/claude-code und öffne Atlas Werkstatt danach noch einmal.</div>
+
+  <div class="raster">
+    <section class="karte" data-start="neu" aria-labelledby="neu-titel">
+      <h2 id="neu-titel">Neues Kit</h2>
+      <p class="unter">Ein neues, leeres Kit für deine erste Pipeline. Danach führt dich die Werkstatt durch die ersten Schritte.</p>
+      <form id="neu-form" novalidate>
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="meine-pipeline" aria-describedby="name-hilfe">
+        <p class="feldhilfe" id="name-hilfe">Kleinbuchstaben, Ziffern und Bindestriche, zum Beispiel belege-pruefen.</p>
+        <label id="ort-titel">Ort</label>
+        <div class="ort" aria-labelledby="ort-titel"><code id="ort" data-start="ort">…</code><button type="button" class="rand klein" id="ort-aendern">Ort ändern…</button></div>
+        <button type="submit" class="haupt" id="anlegen">Anlegen und öffnen</button>
+      </form>
+      <p class="meldung" id="neu-meldung" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="karte" data-start="zuletzt" aria-labelledby="zuletzt-titel">
+      <h2 id="zuletzt-titel">Zuletzt geöffnet</h2>
+      <p class="unter">Ein Klick öffnet das Kit in der Werkstatt.</p>
+      <ul class="liste" id="zuletzt-liste"></ul>
+      <p class="leer" id="zuletzt-leer" hidden>Noch keins. Sobald du ein Kit öffnest, steht es hier.</p>
+      <button type="button" class="rand" id="anderes" data-start="anderes">Anderes Kit öffnen…</button>
+      <p class="meldung" id="oeffnen-meldung" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <div class="ende" id="ende" data-start="ende" role="alert" hidden></div>
+</main>
+<footer>Die Startseite läuft nur auf deinem Rechner. Arbeitet die KI im Terminal-Fenster für dich, schickt Claude Code die dafür nötigen Teile deines Kits an Anthropic, wie bei jeder Arbeit mit Claude.</footer>
+<script>
+(function () {
+  'use strict';
+  var SPEICHER = 'atlas-start-schluessel';
+  var NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+  var OFFEN = 'Das Terminal-Fenster mit Claude geht auf. Darin startet die Werkstatt und öffnet sich im Browser.';
+  var PAUSE = 'Atlas Werkstatt hat sich nach einer Pause beendet. Öffne das Programm noch einmal.';
+  var schluessel = null;
+  var stand = null;
+  var beschaeftigt = false;
+  var ortGewaehlt = false;
+  var el = function (id) { return document.getElementById(id); };
+
+  function merke(wert) {
+    try { if (wert) { sessionStorage.setItem(SPEICHER, wert); } else { sessionStorage.removeItem(SPEICHER); } } catch (e) { /* ohne Speicher */ }
+  }
+  function gemerkt() {
+    try { return sessionStorage.getItem(SPEICHER); } catch (e) { return null; }
+  }
+
+  function api(methode, pfad, daten) {
+    var koepfe = {};
+    if (schluessel) { koepfe['X-Atlas-Start'] = schluessel; }
+    var optionen = { method: methode, headers: koepfe, cache: 'no-store', credentials: 'omit' };
+    if (methode === 'POST') {
+      koepfe['Content-Type'] = 'application/json';
+      optionen.body = JSON.stringify(daten || {});
+    }
+    return fetch(pfad, optionen).then(function (antwort) {
+      return antwort.json().catch(function () { return {}; }).then(function (inhalt) {
+        return { status: antwort.status, daten: inhalt };
+      });
+    });
+  }
+
+  function zeige(id, text, art) {
+    var m = el(id);
+    m.textContent = text || '';
+    if (art) { m.setAttribute('data-art', art); } else { m.removeAttribute('data-art'); }
+  }
+
+  function zuEnde(text) {
+    var ende = el('ende');
+    ende.textContent = text;
+    ende.hidden = false;
+    sperre(true);
+  }
+
+  function sperre(an) {
+    var gesperrt = an || !stand || !stand.claude;
+    el('anlegen').disabled = gesperrt || !stand || !stand.anlegen || beschaeftigt;
+    el('ort-aendern').disabled = gesperrt || !stand || !stand.anlegen || beschaeftigt;
+    el('name').disabled = gesperrt || !stand || !stand.anlegen;
+    el('anderes').disabled = gesperrt || beschaeftigt;
+    var knoepfe = document.querySelectorAll('.kit');
+    for (var i = 0; i < knoepfe.length; i++) { knoepfe[i].disabled = gesperrt || beschaeftigt; }
+  }
+
+  function zeichne() {
+    document.querySelector('[data-start="claude-fehlt"]').hidden = stand.claude;
+    if (!ortGewaehlt) {
+      el('ort').textContent = stand.ort.anzeige;
+      el('ort').setAttribute('data-pfad', stand.ort.pfad);
+    }
+    var liste = el('zuletzt-liste');
+    liste.textContent = '';
+    stand.zuletzt.forEach(function (kit) {
+      var li = document.createElement('li');
+      var knopf = document.createElement('button');
+      knopf.type = 'button';
+      knopf.className = 'kit';
+      knopf.setAttribute('data-pfad', kit.pfad);
+      var name = document.createElement('strong');
+      name.textContent = kit.kit_id;
+      var ort = document.createElement('span');
+      ort.textContent = kit.anzeige;
+      knopf.appendChild(name);
+      knopf.appendChild(ort);
+      knopf.addEventListener('click', function () { oeffne(kit.pfad); });
+      li.appendChild(knopf);
+      liste.appendChild(li);
+    });
+    el('zuletzt-leer').hidden = stand.zuletzt.length > 0;
+    if (!stand.anlegen) { zeige('neu-meldung', 'Neue Kits legt diese Fassung noch nicht an.', 'fehler'); }
+    sperre(false);
+  }
+
+  function lade() {
+    return api('GET', '/api/status').then(function (a) {
+      if (a.status !== 200) { zuEnde(PAUSE); return; }
+      stand = a.daten;
+      zeichne();
+    });
+  }
+
+  function fehlerText(a) {
+    return (a.daten && a.daten.fehler) || 'Das hat nicht geklappt. Versuch es noch einmal.';
+  }
+
+  function arbeite(meldung, aufgabe) {
+    if (beschaeftigt) { return; }
+    beschaeftigt = true;
+    sperre(false);
+    zeige(meldung, '', null);
+    aufgabe().catch(function () { zuEnde(PAUSE); }).then(function () {
+      beschaeftigt = false;
+      if (el('ende').hidden) { sperre(false); }
+    });
+  }
+
+  function oeffne(pfad) {
+    arbeite('oeffnen-meldung', function () {
+      return api('POST', '/api/oeffne-kit', { pfad: pfad }).then(function (a) {
+        if (a.status === 200) { zeige('oeffnen-meldung', a.daten.kit_id + ': ' + OFFEN, 'ok'); }
+        else { zeige('oeffnen-meldung', fehlerText(a), 'fehler'); }
+      });
+    });
+  }
+
+  el('anderes').addEventListener('click', function () {
+    arbeite('oeffnen-meldung', function () {
+      return api('POST', '/api/waehle', { zweck: 'kit' }).then(function (a) {
+        if (a.status !== 200) { zeige('oeffnen-meldung', fehlerText(a), 'fehler'); return; }
+        if (a.daten.abgebrochen) { return; }
+        zeige('oeffnen-meldung', a.daten.kit_id + ': ' + OFFEN, 'ok');
+      });
+    });
+  });
+
+  el('ort-aendern').addEventListener('click', function () {
+    arbeite('neu-meldung', function () {
+      return api('POST', '/api/waehle', { zweck: 'ort' }).then(function (a) {
+        if (a.status !== 200) { zeige('neu-meldung', fehlerText(a), 'fehler'); return; }
+        if (a.daten.abgebrochen) { return; }
+        ortGewaehlt = true;
+        el('ort').textContent = a.daten.anzeige;
+        el('ort').setAttribute('data-pfad', a.daten.pfad);
+      });
+    });
+  });
+
+  el('neu-form').addEventListener('submit', function (ereignis) {
+    ereignis.preventDefault();
+    var name = el('name').value.trim();
+    if (!NAME.test(name)) {
+      zeige('neu-meldung', 'Der Name passt so nicht. Nimm Kleinbuchstaben, Ziffern und Bindestriche, zum Beispiel belege-pruefen.', 'fehler');
+      el('name').focus();
+      return;
+    }
+    arbeite('neu-meldung', function () {
+      return api('POST', '/api/anlegen', { name: name, ort: el('ort').getAttribute('data-pfad') }).then(function (a) {
+        if (a.status === 200) { zeige('neu-meldung', a.daten.anzeige + ': ' + OFFEN, 'ok'); }
+        else { zeige('neu-meldung', fehlerText(a), 'fehler'); }
+      });
+    });
+  });
+
+  function start() {
+    var treffer = /^#einmal=([A-Za-z0-9_-]+)$/.exec(location.hash);
+    if (location.hash) { history.replaceState(null, '', location.pathname); }
+    var weg = treffer
+      ? api('POST', '/api/einloesen', { ticket: treffer[1] }).then(function (a) {
+          if (a.status === 200 && a.daten.schluessel) { schluessel = a.daten.schluessel; merke(schluessel); return true; }
+          schluessel = gemerkt();
+          if (!schluessel) { zuEnde(fehlerText(a)); }
+          return !!schluessel;
+        })
+      : Promise.resolve((schluessel = gemerkt()) !== null);
+    weg.then(function (da) {
+      if (!da) { if (el('ende').hidden) { zuEnde('Öffne Atlas Werkstatt über das Programm.'); } return null; }
+      return lade();
+    }).catch(function () { zuEnde(PAUSE); });
+    setInterval(function () {
+      if (!schluessel || !el('ende').hidden) { return; }
+      api('GET', '/api/status').then(function (a) {
+        if (a.status === 200) { stand = a.daten; if (!beschaeftigt) { zeichne(); } } else { zuEnde(PAUSE); }
+      }).catch(function () { zuEnde(PAUSE); });
+    }, 60000);
+  }
+
+  sperre(true);
+  start();
+})();
+</script>
+</body>
+</html>

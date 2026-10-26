@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from pathlib import Path
+
+import plattform
 
 ORDNER_NAME = "atlas-kit"
 NICHT_ERLAUBT = re.compile(r"[^A-Za-z0-9._-]")
@@ -42,15 +45,35 @@ def lege_an(ordner: Path) -> bool:
     return True
 
 
-def schreibe_atomar(ziel: Path, inhalt: bytes) -> None:
-    temp = ziel.parent / f".{ziel.name}.{os.getpid()}.tmp"
+def _standard_rechte() -> int:
+    maske = os.umask(0)
+    os.umask(maske)
+    return 0o666 & ~maske
+
+
+STANDARD_RECHTE = _standard_rechte()
+
+
+def schreibe_atomar(ziel: Path, inhalt: bytes, modus: int | None = None) -> None:
+    """Schreibt erst eine Temp-Datei mit zufälligem Namen im Zielordner (O_EXCL, folgt keinem Symlink),
+    dann os.replace. Rechte: modus, sonst die der vorhandenen Datei, sonst die Vorgabe der umask."""
     try:
-        with open(temp, "wb") as datei:
+        nummer, temp = tempfile.mkstemp(prefix=f".{ziel.name}.", suffix=".tmp", dir=str(ziel.parent))
+    except OSError:
+        raise NichtSchreibbar(ziel.parent)
+    try:
+        with os.fdopen(nummer, "wb") as datei:
             datei.write(inhalt)
-        os.replace(temp, ziel)
+        if modus is None:
+            try:
+                modus = os.lstat(ziel).st_mode & 0o777 if not os.path.islink(ziel) else STANDARD_RECHTE
+            except OSError:
+                modus = STANDARD_RECHTE
+        os.chmod(temp, modus)
+        plattform.ersetze(temp, ziel)
     except OSError:
         try:
-            temp.unlink()
+            os.unlink(temp)
         except OSError:
             pass
         raise NichtSchreibbar(ziel.parent)

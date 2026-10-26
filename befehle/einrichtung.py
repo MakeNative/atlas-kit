@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+import plattform
 import texte
 from finden import tilde
 
@@ -42,9 +43,7 @@ def datenordner(paket: Path, daten: Path | None) -> Path:
 
 
 def _python_in(umgebung: Path) -> Path:
-    if sys.platform.startswith("win"):
-        return umgebung / "Scripts" / "python.exe"
-    return umgebung / "bin" / "python"
+    return plattform.python_in(umgebung)
 
 
 def _laeuft(python: Path) -> bool:
@@ -107,13 +106,7 @@ def _inhaber() -> str:
 
 
 def _lebt(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True
-    return True
+    return plattform.lebt(pid)
 
 
 def _verwaist(sperre: Path) -> bool:
@@ -143,7 +136,7 @@ def _nimm_sperre(daten: Path, python: Path) -> bool:
     ende = time.monotonic() + WARTEN_HOECHSTENS_S
     while True:
         try:
-            datei = os.open(sperre, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            datei = os.open(sperre, os.O_CREAT | os.O_EXCL | os.O_WRONLY | plattform.BINAER, 0o644)
         except FileExistsError:
             if _laeuft(python):
                 return False
@@ -185,7 +178,7 @@ def python_der_umgebung(paket: Path, daten: Path | None, home: Path, sage: Calla
         _entferne(neu)
         _lege_umgebung_an(neu, paket / "requirements.txt")
         _entferne(umgebung)
-        os.replace(neu, umgebung)
+        plattform.ersetze(neu, umgebung, geduldig=True)
         if not _laeuft(python):
             _entferne(umgebung)
             raise EinrichtungFehler([texte.UMGEBUNG_FEHLER])

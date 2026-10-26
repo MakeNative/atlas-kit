@@ -33,7 +33,8 @@ class Kit:
 def tilde(pfad: Path, home: Path) -> str:
     for p, h in ((os.path.abspath(pfad), os.path.abspath(home)),
                  (os.path.realpath(pfad), os.path.realpath(home))):
-        if h and h != os.sep and (p == h or p.startswith(h + os.sep)):
+        gross_klein = os.path.normcase(p)  # Windows: ohne Unterschied von Groß- und Kleinschreibung
+        if h and h != os.sep and (gross_klein == os.path.normcase(h) or gross_klein.startswith(os.path.normcase(h + os.sep))):
             return "~" + p[len(h):].replace(os.sep, "/")
     return os.path.abspath(pfad)
 
@@ -73,7 +74,7 @@ def anzeige(argument: str, pfad: Path, home: Path) -> str:
 def _plugin_name(ordner: Path, home: Path) -> str:
     datei = ordner / PLUGIN_JSON
     try:
-        daten = json.loads(datei.read_text(encoding="utf-8"))
+        daten = json.loads(datei.read_text(encoding="utf-8-sig"))  # BOM: PowerShell 5 unter Windows
     except UnicodeDecodeError:
         raise KeinKit([texte.plugin_unlesbar(tilde(ordner, home), "nicht als UTF-8 lesbar")])
     except json.JSONDecodeError as fehler:
@@ -141,10 +142,14 @@ def pruefe_ordner(ordner: Path, home: Path, befehl: str) -> Kit:
 
 
 def _gleicher_ordner(a: str, b: Path) -> bool:
+    """Gleicher Ordner über die Identität (st_dev, st_ino), damit Groß-/Kleinschreibung nichts umgeht."""
     try:
-        return os.path.realpath(a) == os.path.realpath(b)
-    except (TypeError, ValueError):
-        return False
+        return os.path.samefile(a, b)
+    except (OSError, TypeError, ValueError):
+        try:
+            return os.path.realpath(a) == os.path.realpath(b)
+        except (TypeError, ValueError):
+            return False
 
 
 def _installationsordner(eintraege: object, arbeitsordner: Path) -> str | None:
@@ -170,6 +175,43 @@ def _installierte_eintraege(home: Path) -> dict:
         return {}
     plugins = daten.get("plugins") if isinstance(daten, dict) else None
     return plugins if isinstance(plugins, dict) else {}
+
+
+def _eltern(pfad: Path) -> list[Path]:
+    kette: list[Path] = []
+    for start in (Path(os.path.abspath(pfad)), Path(os.path.realpath(pfad))):
+        kette += [start, *start.parents]
+    return kette
+
+
+def liegt_unter(pfad: Path, ordner: Path) -> bool:
+    """Ist pfad gleich ordner oder liegt darin? Geprüft über die Identität der Ordner (st_dev, st_ino) entlang
+    des angegebenen UND des aufgelösten Pfads (realpath), nicht über die Schreibweise."""
+    ziele = []
+    for kandidat in (ordner, Path(os.path.realpath(ordner))):
+        try:
+            ziele.append(os.stat(kandidat))
+        except OSError:
+            continue
+    if not ziele:
+        return False
+    for kandidat in _eltern(pfad):
+        try:
+            info = os.stat(kandidat)
+        except OSError:
+            continue
+        if any(os.path.samestat(info, ziel) for ziel in ziele):
+            return True
+    return False
+
+
+def ist_installierte_kopie(ordner: Path, home: Path, konfiguration: Path | None = None) -> bool:
+    """WS-S4: unter <HOME>/.claude/plugins bzw. <CLAUDE_CONFIG_DIR>/plugins (über die Identität der Ordner, nicht die
+    Schreibweise) oder ein Installationsordner aus installed_plugins.json. Für Server (schreibbar) und knopf."""
+    konfiguration = konfiguration or Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
+    if any(liegt_unter(ordner, wurzel) for wurzel in (home / ".claude" / "plugins", konfiguration / "plugins")):
+        return True
+    return ist_installationsordner(ordner, home)
 
 
 def ist_installationsordner(ordner: Path, home: Path) -> bool:
@@ -200,12 +242,40 @@ def installiertes_kit(name: str, arbeitsordner: Path, home: Path) -> Path | None
     return kits[treffer[0]] if treffer else None
 
 
-def finde_kit(argument: str, arbeitsordner: Path, home: Path, befehl: str) -> Kit:
+def _installierte_namens(name: str, arbeitsordner: Path, home: Path) -> list[tuple[str, Path]]:
+    kits = installierte_kits(arbeitsordner, home)
+    if "@" in name:
+        return [(name, kits[name])] if name in kits else []
+    return [(voll, kits[voll]) for voll in sorted(kits) if voll.split("@", 1)[0] == name]
+
+
+def _mit_eigenen(name: str, arbeitsordner: Path, home: Path, befehl: str, eigene: list[Kit], auswahl: str) -> Kit:
+    """WS-NK9: eigene, zuletzt geöffnete Kits (kit.id oder Ordnername) und installierte Kits dieses Namens; auswahl ist
+    der Befehl vor jeder Zeile der Auswahl (mit Unterbefehl, z. B. '/atlas:werkstatt stopp')."""
+    treffer = [k for k in eigene if "@" not in name and (k.kit_id == name or k.ordner.name == name)]
+    installiert = [(voll, ordner) for voll, ordner in _installierte_namens(name, arbeitsordner, home)
+                   if not any(_gleicher_ordner(str(ordner), k.ordner) for k in treffer)]
+    if len(treffer) + len(installiert) > 1:
+        raise KeinKit([texte.mehrere_kits(name), *(f"{auswahl} {tilde(k.ordner, home)}" for k in treffer),
+                       *(f"{auswahl} {voll}" for voll, _ in installiert)])
+    if treffer:
+        return treffer[0]
+    if installiert:
+        return pruefe_ordner(Path(os.path.abspath(installiert[0][1])), home, befehl)
+    raise KeinKit([texte.nichts_namens(name, befehl)])
+
+
+def finde_kit(argument: str, arbeitsordner: Path, home: Path, befehl: str, eigene: list[Kit] | None = None,
+              auswahl: str | None = None) -> Kit:
+    """eigene: zuletzt geöffnete Kits, die über den Namen mit gefunden werden (nur die Werkstatt, WS-NK9); auswahl: der
+    Befehl in den Zeilen einer Auswahl, ohne Angabe befehl."""
     if ist_ordnerangabe(argument, arbeitsordner):
         ordner = als_pfad(argument, arbeitsordner, home)
         if not ordner.is_dir():
             raise KeinKit([texte.ordner_fehlt(anzeige(argument, ordner, home), befehl)])
         return pruefe_ordner(ordner, home, befehl)
+    if eigene is not None:
+        return _mit_eigenen(argument, arbeitsordner, home, befehl, eigene, auswahl or befehl)
     installiert = installiertes_kit(argument, arbeitsordner, home)
     if installiert is None:
         raise KeinKit([texte.nichts_namens(argument, befehl)])
