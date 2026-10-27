@@ -9,6 +9,9 @@ from __future__ import annotations
 import re
 import unicodedata
 
+import werkstatt_pfade as pfade
+from hooks import AGENT_EREIGNISSE, EREIGNISSE, WERKZEUG_EREIGNISSE
+from ordner import HOOK_ORDNER
 from vokabular import AUSFUEHRENDE, MENSCH, ROLLEN, SCHRITT_ID, WERKZEUG_PFAD
 
 SCHEMA = "atlas-aenderung/0.1"
@@ -38,6 +41,12 @@ NICHT_GEMISCHT = "Ein Satz mit Memory-Einträgen enthält keine anderen Änderun
 GEDAECHTNIS_ID = re.compile(r"^g[0-9a-f]{12}$")
 GEDAECHTNIS_DATEI = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.md$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+KONTEXT_ID = re.compile(r"^k[0-9a-f]{12}$")
+KONTEXT_INHALT_BYTES = 256 * 1024
+NUR_AUS_PANEL = "Dateien des Kontexts ändert die Werkstatt nur aus dem Panel „Memory und Kontext“."
+NUR_EINE_DATEI = "Ein Satz mit datei_ersetzen ändert genau eine Datei und enthält keine andere Änderung."
+MATCHER_HOECHSTENS = 200
+TIMEOUT_HOECHSTENS = 600
 
 
 class SatzFehler(Exception):
@@ -56,8 +65,13 @@ def _steuerzeichen(text: str, mit_umbruch: bool) -> bool:
 
 
 class _Pruefer:
-    def __init__(self) -> None:
+    def __init__(self, hook_ordner: str | None = None) -> None:
         self.meldungen: list[str] = []
+        self.hook_ordner = hook_ordner
+
+    def hook_skript_erlaubt(self, wert: object) -> bool:
+        ordner = (self.hook_ordner,) if self.hook_ordner is not None else tuple(HOOK_ORDNER.values())
+        return any(pfade.ist_hook_skript(wert, o) for o in ordner)
 
     def fehler(self, ort: str, text: str) -> None:
         self.meldungen.append(f"{ort}: {text}")
@@ -250,6 +264,79 @@ def _agent_felder(p: _Pruefer, ort: str, op: dict, anlegen: bool) -> None:
             p.fehler(f"{ort}.text_stand", "erwartet sha256 als 64 Zeichen hex")
 
 
+def _matcher(p: _Pruefer, ort: str, wert: object, ereignis: object) -> None:
+    if wert is None or not p.zeile(ort, wert, MATCHER_HOECHSTENS):
+        return
+    if ereignis in WERKZEUG_EREIGNISSE or ereignis in AGENT_EREIGNISSE:
+        try:
+            re.compile(wert)
+        except re.error:
+            p.fehler(ort, "ist kein gültiger regulärer Ausdruck")
+
+
+def _hook_ref(p: _Pruefer, ort: str, wert: object) -> None:
+    ref = p.felder(ort, wert, ("ereignis", "skript"), ("matcher",))
+    if ref is None:
+        return
+    p.zeile(f"{ort}.ereignis", ref.get("ereignis"), MATCHER_HOECHSTENS)
+    if ref.get("matcher") is not None:
+        p.zeile(f"{ort}.matcher", ref["matcher"], MATCHER_HOECHSTENS, leer_erlaubt=True)
+    skript = ref.get("skript")
+    if p.zeile(f"{ort}.skript", skript, MATCHER_HOECHSTENS) and (
+            skript.startswith("/") or "\\" in skript or any(t in ("", ".", "..") for t in skript.split("/"))):
+        p.fehler(f"{ort}.skript", "ist kein Pfad im Kit")
+
+
+def _timeout(p: _Pruefer, ort: str, wert: object) -> None:
+    if wert is not None and (not isinstance(wert, int) or isinstance(wert, bool) or not 1 <= wert <= TIMEOUT_HOECHSTENS):
+        p.fehler(ort, f"erwartet eine ganze Zahl von 1 bis {TIMEOUT_HOECHSTENS}")
+
+
+def _hook_text(p: _Pruefer, ort: str, wert: object) -> None:
+    if p.langtext(ort, wert) and not wert.strip():
+        p.fehler(ort, "darf nicht leer sein")
+
+
+def _pruefe_hook_operation(p: _Pruefer, ort: str, art: str, op: object) -> None:
+    """Ticket 31 (WS-F2, WS-F3): ereignis aus atlas/hooks.EREIGNISSE, matcher, skript, text, timeout, text_stand."""
+    if art == "hook_anlegen":
+        o = p.felder(ort, op, ("ereignis", "skript"), ("matcher", "text", "timeout"))
+        if o is None:
+            return
+        p.auswahl(f"{ort}.ereignis", o.get("ereignis"), EREIGNISSE)
+        _matcher(p, f"{ort}.matcher", o.get("matcher"), o.get("ereignis"))
+        if not p.hook_skript_erlaubt(o.get("skript")):
+            ordner = p.hook_ordner or "<hooks>"
+            p.fehler(f"{ort}.skript", f"erwartet {ordner}/<name>.py bzw. .sh mit einem Namen aus a-z, 0-9, - und _")
+        if "text" in o:
+            _hook_text(p, f"{ort}.text", o["text"])
+        _timeout(p, f"{ort}.timeout", o.get("timeout"))
+    elif art == "hook_aendern":
+        o = p.felder(ort, op, ("hook",), ("ereignis", "matcher", "text", "text_stand", "timeout"))
+        if o is None:
+            return
+        _hook_ref(p, f"{ort}.hook", o.get("hook"))
+        if "ereignis" in o:
+            p.auswahl(f"{ort}.ereignis", o["ereignis"], EREIGNISSE)
+        ereignis = o.get("ereignis", (o.get("hook") or {}).get("ereignis") if isinstance(o.get("hook"), dict) else None)
+        if "matcher" in o:
+            _matcher(p, f"{ort}.matcher", o["matcher"], ereignis)
+        if "text" in o:
+            _hook_text(p, f"{ort}.text", o["text"])
+        if "text" in o and "text_stand" not in o:
+            p.fehler(f"{ort}.text", "braucht text_stand (sha256 des Skripts vor dem Satz)")
+        if "text_stand" in o:
+            if "text" not in o:
+                p.fehler(f"{ort}.text_stand", "nur zusammen mit text")
+            elif not (isinstance(o["text_stand"], str) and SHA256.fullmatch(o["text_stand"])):
+                p.fehler(f"{ort}.text_stand", "erwartet sha256 als 64 Zeichen hex")
+        _timeout(p, f"{ort}.timeout", o.get("timeout"))
+    else:
+        o = p.felder(ort, op, ("hook",), ())
+        if o is not None:
+            _hook_ref(p, f"{ort}.hook", o.get("hook"))
+
+
 def _pruefe_operation(p: _Pruefer, ort: str, art: str, op: object) -> None:
     if art == "agent_anlegen":
         o = p.felder(ort, op, ("name", "beschreibung", "text"), ("rolle", "tools", "model", "memory"))
@@ -333,11 +420,15 @@ def _pruefe_operation(p: _Pruefer, ort: str, art: str, op: object) -> None:
         o = p.felder(ort, op, ("datei", "alt", "neu"), ())
         if o is not None:
             datei = o.get("datei")
-            if not isinstance(datei, str) or not TEXT_DATEI.fullmatch(datei) or ".." in datei:
-                p.fehler(f"{ort}.datei", "erwartet skills/<name>/SKILL.md oder agents/<name>.md (im Projekt unter .claude/)")
+            if not isinstance(datei, str) or ".." in datei or not (TEXT_DATEI.fullmatch(datei)
+                                                                    or p.hook_skript_erlaubt(datei)):
+                p.fehler(f"{ort}.datei", "erwartet skills/<name>/SKILL.md, agents/<name>.md (im Projekt unter .claude/) "
+                                         "oder ein Hook-Skript <hooks>/<name>.py bzw. .sh")
             if p.langtext(f"{ort}.alt", o.get("alt")) and not o["alt"]:
                 p.fehler(f"{ort}.alt", "darf nicht leer sein")
             p.langtext(f"{ort}.neu", o.get("neu"))
+    elif art in HOOK_OPERATIONEN:
+        _pruefe_hook_operation(p, ort, art, op)
     elif art in MEMORY_OPERATIONEN:
         letzter = ("zeilentext",) if art == "memory_zeile_entfernen" else ("sha256",)
         o = p.felder(ort, op, ("gedaechtnis_id", "datei", *letzter), ())
@@ -348,6 +439,14 @@ def _pruefe_operation(p: _Pruefer, ort: str, art: str, op: object) -> None:
                 p.zeile(f"{ort}.zeilentext", o.get("zeilentext"), TEXT_HOECHSTENS)
             else:
                 p.muster(f"{ort}.sha256", o.get("sha256"), SHA256, "sha256")
+    elif art in KONTEXT_OPERATIONEN:
+        o = p.felder(ort, op, ("datei_id", "sha256", "inhalt"), ())
+        if o is not None:
+            p.muster(f"{ort}.datei_id", o.get("datei_id"), KONTEXT_ID, "Kennung einer Kontext-Datei")
+            p.muster(f"{ort}.sha256", o.get("sha256"), SHA256, "sha256")
+            inhalt = o.get("inhalt")
+            if not isinstance(inhalt, str) or "\x00" in inhalt or not _utf8_bis(inhalt, KONTEXT_INHALT_BYTES):
+                p.fehler(f"{ort}.inhalt", "erwartet einen Text mit höchstens 256 KiB ohne NUL-Zeichen")
     elif art == "skill_anlegen":
         o = p.felder(ort, op, ("name", "beschreibung", "nutzen", "schritte"), ("eingabe", "ergebnis"))
         if o is not None:
@@ -369,8 +468,24 @@ def _pruefe_operation(p: _Pruefer, ort: str, art: str, op: object) -> None:
 
 
 OPERATIONEN = ("agent_anlegen", "agent_aendern", "agent_loeschen", "schritt_einfuegen", "schritt_aendern",
-               "schritt_entfernen", "schleife_setzen", "skill_anlegen", "text_ersetzen")
+               "schritt_entfernen", "schleife_setzen", "skill_anlegen", "text_ersetzen", "hook_anlegen", "hook_aendern",
+               "hook_entfernen")
+HOOK_OPERATIONEN = ("hook_anlegen", "hook_aendern", "hook_entfernen")
 MEMORY_OPERATIONEN = ("memory_zeile_entfernen", "memory_datei_entfernen")
+KONTEXT_OPERATIONEN = ("datei_ersetzen",)
+
+
+def _utf8_bis(text: str, hoechstens: int) -> bool:
+    try:
+        return len(text.encode("utf-8")) <= hoechstens
+    except UnicodeEncodeError:
+        return False
+
+
+def ist_kontext_satz(satz: object) -> bool:
+    eintraege = satz.get("eintraege") if isinstance(satz, dict) else None
+    return isinstance(eintraege, list) and any(isinstance(e, dict) and any(k in KONTEXT_OPERATIONEN for k in e)
+                                               for e in eintraege)
 
 
 def ist_gedaechtnis_satz(satz: object) -> bool:
@@ -379,9 +494,11 @@ def ist_gedaechtnis_satz(satz: object) -> bool:
                                                for e in eintraege)
 
 
-def pruefe(satz: object, gedaechtnis_erlaubt: bool = False) -> dict:
-    """Wirft SatzFehler mit allen Meldungen; gibt den Satz unverändert zurück."""
-    p = _Pruefer()
+def pruefe(satz: object, gedaechtnis_erlaubt: bool = False, kontext_erlaubt: bool = False,
+           hook_ordner: str | None = None) -> dict:
+    """Wirft SatzFehler mit allen Meldungen; gibt den Satz unverändert zurück. hook_ordner (hooks bzw. .claude/hooks)
+    legt fest, wo Hook-Skripte liegen dürfen; ohne gilt beides."""
+    p = _Pruefer(hook_ordner)
     s = p.felder("Satz", satz, ("schema", "titel", "herkunft", "eintraege"), ())
     if s is None:
         raise SatzFehler(p.meldungen)
@@ -393,6 +510,12 @@ def pruefe(satz: object, gedaechtnis_erlaubt: bool = False) -> dict:
     if not isinstance(eintraege, list) or not 1 <= len(eintraege) <= EINTRAEGE_HOECHSTENS:
         p.fehler("Satz.eintraege", f"erwartet eine Liste mit 1 bis {EINTRAEGE_HOECHSTENS} Einträgen")
         raise SatzFehler(p.meldungen)
+    if ist_kontext_satz(s):
+        if not kontext_erlaubt:
+            raise SatzFehler([NUR_AUS_PANEL])
+        if len(eintraege) != 1 or not all(isinstance(e, dict) and any(k in KONTEXT_OPERATIONEN for k in e)
+                                          for e in eintraege):
+            raise SatzFehler([NUR_EINE_DATEI])
     if ist_gedaechtnis_satz(s):
         if not gedaechtnis_erlaubt:
             raise SatzFehler([NUR_AUS_AUSWERTUNG])
@@ -418,7 +541,7 @@ def pruefe(satz: object, gedaechtnis_erlaubt: bool = False) -> dict:
             p.fehler(ort, "braucht genau eine Operation")
             continue
         art = arten[0]
-        if art not in OPERATIONEN and art not in MEMORY_OPERATIONEN:
+        if art not in OPERATIONEN and art not in MEMORY_OPERATIONEN and art not in KONTEXT_OPERATIONEN:
             p.fehler(ort, f"unbekannte Operation {art}")
             continue
         _pruefe_operation(p, f"{ort}.{art}", art, e[art])

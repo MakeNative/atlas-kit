@@ -9,6 +9,7 @@ from vokabular import AGENT_MUSTER, SKILL_DATEI, WERKZEUG_MUSTER, WERKZEUG_ORDNE
 PLUGIN_JSON = ".claude-plugin/plugin.json"
 PLUGIN = "plugin"
 PROJEKT = "projekt"
+HOOK_ORDNER = {PLUGIN: "hooks", PROJEKT: ".claude/hooks"}
 
 
 class OrdnerFehler(Exception):
@@ -27,6 +28,14 @@ class Ordner:
     @property
     def ist_projekt(self) -> bool:
         return self.art == PROJEKT
+
+    @property
+    def hook_ordner(self) -> str:
+        return HOOK_ORDNER[self.art]
+
+    @property
+    def hook_freigabe(self) -> tuple[str, str]:
+        return self.hooks, self.hook_ordner
 
     def skill_ordner(self) -> list[Path]:
         """Alle Unterordner des Skill-Ordners (auch über Symlinks), sortiert; eine Skill ist darin SKILL.md."""

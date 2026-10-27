@@ -77,6 +77,14 @@ class VirtuellesKit:
         """Inhalt auf der Platte, ohne die Änderungen dieses Satzes."""
         return self._von_platte(rel)
 
+    def neu_inhalt(self, rel: str) -> tuple[bool, bytes | None]:
+        """(True, Inhalt) für eine Datei, die dieser Satz schreibt oder löscht (None); sonst (False, None)."""
+        return (True, self._neu[rel]) if rel in self._neu else (False, None)
+
+    def merke_gelesen(self, rel: str, inhalt: bytes | None) -> None:
+        """Ein Inhalt, den ein anderer Leseweg von der Platte geholt hat, bindet den Stand wie _von_platte."""
+        self.gelesen.setdefault(rel, sha(inhalt))
+
     def lies(self, rel: str) -> bytes | None:
         if rel in self._neu:
             return self._neu[rel]
@@ -97,7 +105,7 @@ class VirtuellesKit:
     def pruefe_ziel(self, rel: str) -> None:
         """WS-X5: nur unter dem Kit, kein Symlink auf dem Weg, kein '..'."""
         try:
-            pfade.pruefe_freigabe(rel, self.skills_ordner, self.agenten_ordner)
+            pfade.pruefe_freigabe(rel, self.skills_ordner, self.agenten_ordner, self.ordner.hook_freigabe)
             pfade.pruefe_ziel(self.wurzel, rel)
         except pfade.PfadFehler as fehler:
             raise SchreibFehler(str(fehler))

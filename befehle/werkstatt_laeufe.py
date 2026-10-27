@@ -525,6 +525,22 @@ class Laeufe:
             raise LaufFehler(400, WERKSTATT_ORDNER, FELD_ARBEITSORDNER)
         return Path(os.path.abspath(ordner))
 
+    def pruefe_ort(self, roh: object) -> Path:
+        return self._arbeitsordner(roh)
+
+    def zuletzt_benutzt(self) -> Path | None:
+        if self.werkstatt.art != "plugin":
+            return None
+        return lauf_ort.lies(self.daten, self.werkstatt.kit)
+
+    def arbeitsordner_der_laeufe(self) -> list[Path]:
+        with self.sperre:
+            self._frisch()
+            geordnet = sorted(self.gelesen.values(), key=lambda g: (g.gestartet(), g.lid), reverse=True)
+            texte_ = [g.lauf.get("arbeitsordner") for g in geordnet]
+        self._rufe_enden()
+        return [self._pfad(t) for t in texte_ if isinstance(t, str) and t]
+
     def pruefe_ordner(self, anfrage: dict) -> dict:
         try:
             ordner = self._arbeitsordner(anfrage.get("ordner"))

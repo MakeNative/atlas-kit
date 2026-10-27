@@ -11,6 +11,7 @@ import stat
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import plattform
 
@@ -140,8 +141,11 @@ def gid_fuer(geheimnis: bytes, ordner: Path, anker_id: tuple[int, int], ordner_i
     return "g" + hmac.new(geheimnis, text, hashlib.sha256).hexdigest()[:12]
 
 
-def _identitaet(info) -> tuple[int, int]:
+def identitaet(info) -> tuple[int, int]:
     return (int(info.st_dev), int(info.st_ino))
+
+
+_identitaet = identitaet
 
 
 def _normal(pfad: Path) -> str:
@@ -197,7 +201,7 @@ def ordner_verboten(ordner: Path, verboten: Verboten) -> str | None:
     return None
 
 
-def _lstat(pfad: Path):
+def lstat_oder_fehler(pfad: Path):
     try:
         return os.lstat(pfad)
     except FileNotFoundError:
@@ -206,14 +210,37 @@ def _lstat(pfad: Path):
         return False
 
 
-def _weg(ziel: Ziel) -> list[Path]:
-    weg = []
-    pfad = Path(ziel.anker)
-    for teil in UNTERORDNER[ziel.bereich]:
+_lstat = lstat_oder_fehler
+
+
+def pruefe_weg(anker: Path, anker_id: tuple, teile: tuple[str, ...], ordner_id: tuple,
+               fehler: Callable[[str], Exception]) -> Path:
+    info = _lstat(Path(anker))
+    if info is None or info is False:
+        raise fehler(GRUND_FEHLT)
+    if plattform.ist_verweis_info(info):
+        raise fehler(GRUND_VERWEIS)
+    if not stat.S_ISDIR(info.st_mode):
+        raise fehler(GRUND_KEIN_ORDNER)
+    if _identitaet(info) != tuple(anker_id):
+        raise fehler(GRUND_NICHT_DERSELBE)
+    pfad = Path(anker)
+    for teil in teile:
         pfad = pfad / teil
-        weg.append(pfad)
-    weg.append(Path(ziel.ordner))
-    return weg
+        info = _lstat(pfad)
+        if info is None or info is False:
+            raise fehler(GRUND_FEHLT)
+        if plattform.ist_verweis_info(info):
+            raise fehler(GRUND_VERWEIS)
+        if not stat.S_ISDIR(info.st_mode):
+            raise fehler(GRUND_KEIN_ORDNER)
+    if _identitaet(info) != tuple(ordner_id):
+        raise fehler(GRUND_NICHT_DERSELBE)
+    return pfad
+
+
+def _teile(ziel: Ziel) -> tuple[str, ...]:
+    return (*UNTERORDNER[ziel.bereich], Path(ziel.ordner).name)
 
 
 def pruefe(ziel: Ziel, datei: str, verboten: Verboten, *, wiederherstellen: bool = False,
@@ -223,6 +250,10 @@ def pruefe(ziel: Ziel, datei: str, verboten: Verboten, *, wiederherstellen: bool
     fehlt_erlaubt = wiederherstellen if fehlt_erlaubt is None else fehlt_erlaubt
 
     def fehler(grund: str) -> GedaechtnisFehler:
+        if wiederherstellen and grund == GRUND_FEHLT:
+            return GedaechtnisFehler(gibt_es_nicht_mehr(ordner, home))
+        if wiederherstellen and grund == GRUND_NICHT_DERSELBE:
+            return GedaechtnisFehler(nicht_derselbe(ordner, home))
         return GedaechtnisFehler(schreibt_nicht(ordner, verboten, grund))
 
     if ziel.bereich not in BEREICHE or ordner.parent != Path(ziel.anker).joinpath(*UNTERORDNER[ziel.bereich]):
@@ -232,33 +263,7 @@ def pruefe(ziel: Ziel, datei: str, verboten: Verboten, *, wiederherstellen: bool
     grund = anker_verboten(Path(ziel.anker), verboten) or ordner_verboten(ordner, verboten)
     if grund is not None:
         raise fehler(grund)
-    info = _lstat(Path(ziel.anker))
-    if info is None or info is False:
-        if wiederherstellen:
-            raise GedaechtnisFehler(gibt_es_nicht_mehr(ordner, home))
-        raise fehler(GRUND_FEHLT)
-    if plattform.ist_verweis_info(info):
-        raise fehler(GRUND_VERWEIS)
-    if not stat.S_ISDIR(info.st_mode):
-        raise fehler(GRUND_KEIN_ORDNER)
-    if _identitaet(info) != tuple(ziel.anker_id):
-        if wiederherstellen:
-            raise GedaechtnisFehler(nicht_derselbe(ordner, home))
-        raise fehler(GRUND_NICHT_DERSELBE)
-    for schritt in _weg(ziel):
-        info = _lstat(schritt)
-        if info is None or info is False:
-            if wiederherstellen:
-                raise GedaechtnisFehler(gibt_es_nicht_mehr(ordner, home))
-            raise fehler(GRUND_FEHLT)
-        if plattform.ist_verweis_info(info):
-            raise fehler(GRUND_VERWEIS)
-        if not stat.S_ISDIR(info.st_mode):
-            raise fehler(GRUND_KEIN_ORDNER)
-    if _identitaet(info) != tuple(ziel.ordner_id):
-        if wiederherstellen:
-            raise GedaechtnisFehler(nicht_derselbe(ordner, home))
-        raise fehler(GRUND_NICHT_DERSELBE)
+    pruefe_weg(Path(ziel.anker), ziel.anker_id, _teile(ziel), ziel.ordner_id, fehler)
     if not nur_lesen and not os.access(ordner, os.W_OK | os.X_OK):
         raise fehler(GRUND_SCHREIBSCHUTZ)
     pfad = ordner / datei
@@ -284,29 +289,35 @@ def gerade_geaendert(datei: str, agent: str) -> str:
     return f"{datei} im Memory von {agent} hat sich gerade geändert. Mach „Rückgängig“ noch einmal."
 
 
-def _weg_ohne_verweis(ziel: Ziel, verboten: Verboten) -> None:
-    for schritt in _weg(ziel):
-        info = _lstat(schritt)
+def weg_unveraendert(anker: Path, anker_id: tuple, teile: tuple[str, ...], ordner_id: tuple,
+                     fehler: Callable[[str], Exception]) -> None:
+    pfad = Path(anker)
+    for teil in teile:
+        pfad = pfad / teil
+        info = _lstat(pfad)
         if not info or plattform.ist_verweis_info(info) or not stat.S_ISDIR(info.st_mode):
-            raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_VERWEIS))
-    grund = ordner_verboten(Path(ziel.ordner), verboten)
-    if grund is not None:
-        raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, grund))
+            raise fehler(GRUND_VERWEIS)
+    for ort, soll in ((Path(anker), anker_id), (pfad, ordner_id)):
+        info = _lstat(ort)
+        if info is None or info is False or plattform.ist_verweis_info(info) or not stat.S_ISDIR(info.st_mode) \
+                or _identitaet(info) != tuple(soll):
+            raise fehler(GRUND_NICHT_DERSELBE)
+        try:
+            echt = os.stat(ort)
+        except OSError:
+            raise fehler(GRUND_FEHLT)
+        if _identitaet(echt) != tuple(soll):
+            raise fehler(GRUND_NICHT_DERSELBE)
 
 
 def _identitaeten_gleich(ziel: Ziel, verboten: Verboten) -> None:
-    _weg_ohne_verweis(ziel, verboten)
-    for pfad, soll in ((Path(ziel.anker), ziel.anker_id), (Path(ziel.ordner), ziel.ordner_id)):
-        info = _lstat(pfad)
-        if info is None or info is False or plattform.ist_verweis_info(info) or not stat.S_ISDIR(info.st_mode) \
-                or _identitaet(info) != tuple(soll):
-            raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_NICHT_DERSELBE))
-        try:
-            echt = os.stat(pfad)
-        except OSError:
-            raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_FEHLT))
-        if _identitaet(echt) != tuple(soll):
-            raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_NICHT_DERSELBE))
+    def fehler(grund: str) -> GedaechtnisFehler:
+        return GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, grund))
+
+    weg_unveraendert(Path(ziel.anker), ziel.anker_id, _teile(ziel), ziel.ordner_id, fehler)
+    grund = ordner_verboten(Path(ziel.ordner), verboten)
+    if grund is not None:
+        raise fehler(grund)
 
 
 def lies_datei(pfad: Path, hoechstens: int = DATEI_HOECHSTENS) -> bytes:
@@ -318,19 +329,26 @@ def lies_datei(pfad: Path, hoechstens: int = DATEI_HOECHSTENS) -> bytes:
         info = os.fstat(fd)
         if not os.path.samestat(info, vorher) or not stat.S_ISREG(info.st_mode):
             raise ValueError("keine reguläre Datei")
-        teile = []
-        gelesen = 0
-        while gelesen <= hoechstens:
-            stueck = os.read(fd, min(65536, hoechstens + 1 - gelesen))
-            if not stueck:
-                break
-            teile.append(stueck)
-            gelesen += len(stueck)
+        return lies_fd(fd, hoechstens)
     finally:
         os.close(fd)
+
+
+ZU_GROSS = "zu groß"
+
+
+def lies_fd(fd: int, hoechstens: int) -> bytes:
+    teile = []
+    gelesen = 0
+    while gelesen <= hoechstens:
+        stueck = os.read(fd, min(65536, hoechstens + 1 - gelesen))
+        if not stueck:
+            break
+        teile.append(stueck)
+        gelesen += len(stueck)
     inhalt = b"".join(teile)
     if len(inhalt) > hoechstens:
-        raise ValueError("zu groß")
+        raise ValueError(ZU_GROSS)
     return inhalt
 
 
@@ -386,7 +404,7 @@ def ohne_zeile(inhalt: bytes, zeilentext: str) -> bytes:
     return bom + b"".join(zeilen)
 
 
-def _mit_wiederholung(aktion, pfad: Path, verboten: Verboten) -> None:
+def mit_wiederholung(aktion: Callable[[], None], geoeffnet_: Callable[[], Exception]) -> None:
     versuche = VERSUCHE if plattform.ist_windows() else 1
     for versuch in range(1, versuche + 1):
         try:
@@ -395,61 +413,79 @@ def _mit_wiederholung(aktion, pfad: Path, verboten: Verboten) -> None:
         except PermissionError:
             if versuch >= versuche:
                 if plattform.ist_windows():
-                    raise GedaechtnisFehler(geoeffnet(pfad, verboten.home))
+                    raise geoeffnet_()
                 raise
             time.sleep(VERSUCH_ABSTAND_S)
+
+
+def _mit_wiederholung(aktion, pfad: Path, verboten: Verboten) -> None:
+    mit_wiederholung(aktion, lambda: GedaechtnisFehler(geoeffnet(pfad, verboten.home)))
 
 
 OHNE_PRUEFUNG = object()
 
 
-def _oeffne_ordner(ziel: Ziel, verboten: Verboten) -> int:
-    fehler = GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_NICHT_DERSELBE))
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | NOFOLLOW
+ORDNER_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | NOFOLLOW
+
+
+def oeffne_weg(anker: Path, anker_id: tuple, teile: tuple[str, ...], ordner_id: tuple,
+               fehler: Callable[[str], Exception]) -> int:
     try:
-        fd = os.open(Path(ziel.anker), flags)
+        fd = os.open(Path(anker), ORDNER_FLAGS)
     except OSError:
-        raise fehler
+        raise fehler(GRUND_NICHT_DERSELBE)
     try:
-        if _identitaet(os.fstat(fd)) != tuple(ziel.anker_id):
-            raise fehler
-        for teil in (*UNTERORDNER[ziel.bereich], Path(ziel.ordner).name):
+        if _identitaet(os.fstat(fd)) != tuple(anker_id):
+            raise fehler(GRUND_NICHT_DERSELBE)
+        for teil in teile:
             try:
-                neu = os.open(teil, flags, dir_fd=fd)
+                neu = os.open(teil, ORDNER_FLAGS, dir_fd=fd)
             except OSError:
-                raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_VERWEIS))
+                raise fehler(GRUND_VERWEIS)
             os.close(fd)
             fd = neu
-        if _identitaet(os.fstat(fd)) != tuple(ziel.ordner_id):
-            raise fehler
+        if _identitaet(os.fstat(fd)) != tuple(ordner_id):
+            raise fehler(GRUND_NICHT_DERSELBE)
     except BaseException:
         os.close(fd)
         raise
     return fd
 
 
-def _aktuell(datei: str, ordner_fd: int | None, pfad: Path) -> bytes | None:
+def _oeffne_ordner(ziel: Ziel, verboten: Verboten) -> int:
+    return oeffne_weg(Path(ziel.anker), ziel.anker_id, _teile(ziel), ziel.ordner_id,
+                      lambda grund: GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, grund)))
+
+
+LESE_FLAGS = os.O_RDONLY | BINAER | NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+
+
+def lies_ueber_weg(ordner_fd: int | None, pfad: Path, datei: str, hoechstens: int,
+                   pruefe_info: Callable[[os.stat_result], None] | None = None) -> bytes | None:
+    vorher = None
     try:
         if ordner_fd is None:
-            return lies_datei(pfad, LESEN_HOECHSTENS)
-        fd = os.open(datei, os.O_RDONLY | BINAER | NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=ordner_fd)
+            vorher = os.lstat(pfad)
+            if plattform.ist_verweis_info(vorher) or not stat.S_ISREG(vorher.st_mode):
+                raise ValueError(GRUND_DATEI)
+            fd = os.open(pfad, LESE_FLAGS)
+        else:
+            fd = os.open(datei, LESE_FLAGS, dir_fd=ordner_fd)
     except FileNotFoundError:
         return None
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise ValueError("keine reguläre Datei")
-        teile = []
-        gelesen = 0
-        while True:
-            stueck = os.read(fd, 65536)
-            if not stueck:
-                return b"".join(teile)
-            gelesen += len(stueck)
-            if gelesen > LESEN_HOECHSTENS:
-                raise ValueError("zu groß")
-            teile.append(stueck)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or (vorher is not None and not os.path.samestat(info, vorher)):
+            raise ValueError(GRUND_DATEI)
+        if pruefe_info is not None:
+            pruefe_info(info)
+        return lies_fd(fd, hoechstens)
     finally:
         os.close(fd)
+
+
+def _aktuell(datei: str, ordner_fd: int | None, pfad: Path) -> bytes | None:
+    return lies_ueber_weg(ordner_fd, pfad, datei, LESEN_HOECHSTENS)
 
 
 def _pruefe_stand(ziel: Ziel, datei: str, erwartet: object, ordner_fd: int | None, pfad: Path,
@@ -492,12 +528,11 @@ def _loesche(ziel: Ziel, datei: str, pfad: Path, vorhanden, ordner_fd: int | Non
         _mit_wiederholung(lambda: os.unlink(datei, dir_fd=ordner_fd), pfad, verboten)
 
 
-def _ersetze(ziel: Ziel, datei: str, pfad: Path, inhalt: bytes, modus: int | None, vorhanden,
-             ordner_fd: int | None, erwartet: object, verboten: Verboten, wiederherstellen: bool) -> None:
-    if modus is None:
-        modus = stat.S_IMODE(vorhanden.st_mode) if vorhanden else 0o600
+def ersetze_atomar(ordner: Path, ordner_fd: int | None, datei: str, inhalt: bytes, modus: int,
+                   davor: Callable[[], None], geoeffnet_: Callable[[], Exception]) -> None:
     name = f".{datei}.{secrets.token_hex(6)}.tmp"
-    temp = Path(ziel.ordner) / name
+    temp = Path(ordner) / name
+    pfad = Path(ordner) / datei
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | BINAER | NOFOLLOW
     fd = os.open(temp, flags, 0o600) if ordner_fd is None else os.open(name, flags, 0o600, dir_fd=ordner_fd)
     try:
@@ -512,17 +547,11 @@ def _ersetze(ziel: Ziel, datei: str, pfad: Path, inhalt: bytes, modus: int | Non
             os.close(fd)
         if ordner_fd is None:
             os.chmod(temp, modus)
-        _identitaeten_gleich(ziel, verboten)
-        danach = _lstat(pfad)
-        if danach is False or (danach is not None and (plattform.ist_verweis_info(danach)
-                                                       or not stat.S_ISREG(danach.st_mode))):
-            raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_DATEI))
-        _pruefe_stand(ziel, datei, erwartet, ordner_fd, pfad, verboten, wiederherstellen)
+        davor()
         if ordner_fd is None:
-            _mit_wiederholung(lambda: os.replace(temp, pfad), pfad, verboten)
+            mit_wiederholung(lambda: os.replace(temp, pfad), geoeffnet_)
         else:
-            _mit_wiederholung(lambda: os.replace(name, datei, src_dir_fd=ordner_fd, dst_dir_fd=ordner_fd), pfad,
-                              verboten)
+            mit_wiederholung(lambda: os.replace(name, datei, src_dir_fd=ordner_fd, dst_dir_fd=ordner_fd), geoeffnet_)
     except BaseException:
         try:
             if ordner_fd is None:
@@ -532,6 +561,23 @@ def _ersetze(ziel: Ziel, datei: str, pfad: Path, inhalt: bytes, modus: int | Non
         except OSError:
             pass
         raise
+
+
+def _ersetze(ziel: Ziel, datei: str, pfad: Path, inhalt: bytes, modus: int | None, vorhanden,
+             ordner_fd: int | None, erwartet: object, verboten: Verboten, wiederherstellen: bool) -> None:
+    if modus is None:
+        modus = stat.S_IMODE(vorhanden.st_mode) if vorhanden else 0o600
+
+    def davor() -> None:
+        _identitaeten_gleich(ziel, verboten)
+        danach = _lstat(pfad)
+        if danach is False or (danach is not None and (plattform.ist_verweis_info(danach)
+                                                       or not stat.S_ISREG(danach.st_mode))):
+            raise GedaechtnisFehler(schreibt_nicht(Path(ziel.ordner), verboten, GRUND_DATEI))
+        _pruefe_stand(ziel, datei, erwartet, ordner_fd, pfad, verboten, wiederherstellen)
+
+    ersetze_atomar(Path(ziel.ordner), ordner_fd, datei, inhalt, modus, davor,
+                   lambda: GedaechtnisFehler(geoeffnet(pfad, verboten.home)))
     if ordner_fd is None:
         _nachher_am_ort(ziel, verboten)
 

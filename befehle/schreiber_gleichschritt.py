@@ -5,7 +5,7 @@ Skill-Arten dieselbe Regel für die Zeilen des Schritts (Abschnitt bzw. Prosa-Bl
 1. Steht dort der Satz, den die Werkstatt selbst erzeugt (Startsatz, Mensch-Satz, Schleifen-Satz, vokabular), wird er
    ersetzt bzw. entfernt.
 2. Sonst wird ein alter Agent bzw. eine alte Skill, die dort genau in Backticks oder als subagent_type steht, durch den
-   neuen Namen ersetzt (nur ein alter und ein neuer Name derselben Art).
+   neuen Namen ersetzt (nur ein alter und ein neuer Name derselben Art, auch innerhalb einer Parallelgruppe).
 3. Sonst bleibt der Text, und die Vorschau warnt, dass er das Weggefallene noch nennt (Bestätigung nötig).
 """
 from __future__ import annotations
@@ -31,12 +31,23 @@ def agenten_von(schritt: dict) -> set[str]:
     return namen | ({n for n in parallel if isinstance(n, str)} if isinstance(parallel, list) else set())
 
 
-def _einziger_name(schritt: dict) -> tuple[str, str] | None:
-    if schritt.get("agent"):
-        return "agent", schritt["agent"]
+def _namen_nach_art(schritt: dict) -> tuple[str, set[str]] | None:
+    if schritt.get("agent") or schritt.get("parallel"):
+        return "agent", agenten_von(schritt)
     if schritt.get("skill"):
-        return "skill", schritt["skill"]
+        return "skill", {schritt["skill"]}
     return None
+
+
+def _gewechselter_name(alt: dict, neu: dict) -> tuple[str, str] | None:
+    """Der eine alte und der eine neue Name derselben Art, die wechseln (auch innerhalb einer Parallelgruppe)."""
+    vorher, nachher = _namen_nach_art(alt), _namen_nach_art(neu)
+    if vorher is None or nachher is None or vorher[0] != nachher[0]:
+        return None
+    weg, dazu = vorher[1] - nachher[1], nachher[1] - vorher[1]
+    if len(weg) != 1 or len(dazu) != 1:
+        return None
+    return next(iter(weg)), next(iter(dazu))
 
 
 class Treffer:
@@ -82,16 +93,17 @@ class GleichschrittMixin:
                 rest = text[treffer.end():].lstrip()
                 return self._setze_zeile(datei, i, text[:treffer.start()] + treffer.group("vor") + rest)
             return self._setze_zeile(datei, i, vok.ersetze_satz(text, treffer, None))
-        alter, neuer = _einziger_name(alt), _einziger_name(neu)
-        if alter is None or neuer is None or alter[0] != neuer[0] or alter[1] == neuer[1]:
+        wechsel = _gewechselter_name(alt, neu)
+        if wechsel is None:
             return None
-        muster = [re.compile(m.format(name=re.escape(alter[1]))) for m in _NAME_IN_ZEILE]
+        alter_name, neuer_name = wechsel
+        muster = [re.compile(m.format(name=re.escape(alter_name))) for m in _NAME_IN_ZEILE]
         erste = None
         for i in zeilen:
             text = datei.text(i)
             neu_text = text
             for m in muster:
-                neu_text = m.sub(lambda t: f"{t.group(1)}{neuer[1]}{t.group(2)}", neu_text)
+                neu_text = m.sub(lambda t: f"{t.group(1)}{neuer_name}{t.group(2)}", neu_text)
             if neu_text != text:
                 datei.ersetze(i, i + 1, [neu_text])
                 erste = i if erste is None else erste

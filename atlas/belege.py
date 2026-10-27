@@ -36,6 +36,20 @@ def _zitat_stimmt(dateien: _Dateien, beleg: dict) -> bool:
             and 1 <= zeile <= len(zeilen) and isinstance(zitat, str) and zitat in zeilen[zeile - 1])
 
 
+def _ereignis_beleg_stimmt(dateien: _Dateien, knoten: dict, ereignis: object, befunde: Befunde) -> bool:
+    """R7: Ein Eintrag aus ereignisse eines Modul-Knotens, dessen Zitat nicht stimmt, fällt weg; der Knoten bleibt."""
+    beleg = ereignis.get("beleg") if isinstance(ereignis, dict) else None
+    if isinstance(beleg, dict) and _zitat_stimmt(dateien, beleg):
+        return True
+    beleg = beleg if isinstance(beleg, dict) else {}
+    befunde.melde("beleg_falsch",
+                  f"Das Zitat zum Ereignis am Knoten {knoten['id']} steht nicht in {beleg.get('datei')} "
+                  f"Zeile {beleg.get('zeile')}; das Ereignis entfällt",
+                  beleg.get("datei") or "", beleg.get("zeile"), aussage="ereignisse",
+                  ziel_art="knoten", ziel=str(knoten["id"]))
+    return False
+
+
 def pruefe_belege(kit: Path, knoten: list[dict], kanten: list[dict],
                   befunde: Befunde) -> tuple[list[dict], list[dict]]:
     """Gibt Knoten und Kanten zurück, die die Prüfung bestehen (Knoten ggf. ohne beleg)."""
@@ -53,6 +67,8 @@ def pruefe_belege(kit: Path, knoten: list[dict], kanten: list[dict],
             del k["beleg"]
             if k.get("typ") == "hook":
                 k.pop("bewacht", None)
+        if isinstance(k.get("ereignisse"), list):
+            k["ereignisse"] = [e for e in k["ereignisse"] if _ereignis_beleg_stimmt(dateien, k, e, befunde)]
         rolle_beleg = k.get("rolle_beleg")
         if isinstance(rolle_beleg, dict) and not _zitat_stimmt(dateien, rolle_beleg):
             befunde.melde("beleg_falsch",

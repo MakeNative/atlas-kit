@@ -14,6 +14,7 @@ from ableitung import abgeleitete_schritte
 from schreiber_abgeleitet import AbgeleitetMixin
 from schreiber_agenten import AgentenMixin
 from schreiber_gleichschritt import GleichschrittMixin
+from schreiber_hooks import HooksMixin
 from schreiber_konvention import KonventionMixin
 from schreiber_nur_ableitung import NurAbleitungMixin
 from virtuelles_kit import SchreibFehler, VirtuellesKit
@@ -50,9 +51,10 @@ class Buchfuehrung:
     # Welcher Agent einen Namen trägt, wenn es nicht der Agent des Kits mit diesem Namen ist: Name → ("kit", Name vor
     # dem Satz) nach einer Umbenennung, ("neu", Eintrag) für einen angelegten.
     wer_heisst: dict[str, tuple[str, str]] = field(default_factory=dict)
+    hook_skripte_frei: dict[str, str] = field(default_factory=dict)
 
 
-class Schreiber(AgentenMixin, KonventionMixin, AbgeleitetMixin, NurAbleitungMixin, GleichschrittMixin):
+class Schreiber(AgentenMixin, KonventionMixin, AbgeleitetMixin, NurAbleitungMixin, GleichschrittMixin, HooksMixin):
     """Verteilt jeden Eintrag an die Operation; die Skill-Art entscheidet, welches Modul schreibt."""
 
     def __init__(self, kit: VirtuellesKit):

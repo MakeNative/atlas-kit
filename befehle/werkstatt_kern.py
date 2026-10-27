@@ -36,6 +36,9 @@ import werkstatt_alt
 import werkstatt_bereinigen as bereinigen
 import werkstatt_einstellungen
 import werkstatt_gedaechtnis as gd
+import werkstatt_kontext as kontext_modul
+import werkstatt_kontext_schutz as ks
+import werkstatt_leitplanken as leitplanken_modul
 import werkstatt_pfade as pfade
 from ableitung import belegzeile
 from befunde import Rueck, befund_identitaet
@@ -306,6 +309,8 @@ class _Berechnung:
         self.rechte: list[dict] = []
         self.nummern: dict[str, str] = {}  # Nummer je Eintrag wie in der Vorschau, einmal je Berechnung
         self.letzter = ""  # letzter gewählter Eintrag
+        self.leitplanken: list[dict] = []
+        self.skripte: list[dict] = []
 
     @property
     def rueck(self) -> Rueck:
@@ -383,7 +388,8 @@ class Werkstatt:
         self.sitzung = secrets.token_hex(8)
         self.ablage = ablage_modul.Ablage(self.ergebnis, self.kit, self.ableitung_pfad, self.ordner.skills,
                                           self.ordner.agenten, ablage_modul.lade_geheimnis(Path(geheimnis)),
-                                          sitzung=self.sitzung, ableitung_lesen=lambda: self.ableitung_lesen)
+                                          sitzung=self.sitzung, ableitung_lesen=lambda: self.ableitung_lesen,
+                                          hooks=self.ordner.hook_freigabe)
         self._alter_fund: tuple[werkstatt_alt.Fund | None] | None = None
         self.sperre = threading.RLock()
         self.geschrieben: set[str] = set()
@@ -640,13 +646,28 @@ class Werkstatt:
                         for s in verlauf["saetze"]],
             "vorschlaege": len(self.vorschlaege.liste()),
             "alter_verlauf": self._alter_status(),
-            "zu_speichern": {**self._zu_speichern_liste(verlauf, wurzel), **self._gedaechtnis_ungespeichert(verlauf)},
+            "zu_speichern": {**self._zu_speichern_liste(verlauf, wurzel), **self._gedaechtnis_ungespeichert(verlauf),
+                             **self._kontext_ungespeichert(verlauf)},
         }
 
     def _gedaechtnis_ungespeichert(self, verlauf: dict) -> dict:
         pfade_ = sorted({p for s in verlauf["saetze"] if not s.get("rueckgaengig") and s.get("sitzung") == self.sitzung
                          for p in s.get("gedaechtnis") or [] if isinstance(p, str)})
         return {"gedaechtnis": pfade_} if pfade_ else {}
+
+    def _kontext_ungespeichert(self, verlauf: dict) -> dict:
+        pfade_ = sorted({p for s in verlauf["saetze"] if not s.get("rueckgaengig") and s.get("sitzung") == self.sitzung
+                         for p in s.get("kontext") or [] if isinstance(p, str)})
+        return {"kontext": pfade_} if pfade_ else {}
+
+    @staticmethod
+    def _kontext_kit(eintraege: list[dict]) -> set[str]:
+        return {p for u in eintraege for p in u.get("kontext_kit") or [] if isinstance(p, str)}
+
+    def _pfad_von(self, schluessel: str, kontext_kit: set[str]) -> Path:
+        if schluessel in kontext_kit:
+            return ks.pfad_im_kit(self.kit, schluessel)
+        return self.ablage.pfad(schluessel)
 
     # ------------------------------------------------------------ Alter Verlauf (WS-B8)
 
@@ -700,13 +721,14 @@ class Werkstatt:
         """Was Speichern committen würde, nach derselben Auswahl wie speichern(); der Rest steht in nicht_im_commit
         (nicht im Repo versioniert, von git ignoriert, unverändert oder nicht in diesem Serverlauf geschrieben)."""
         saetze = self._ungespeichert(verlauf)
-        schluessel = sorted({s for u in saetze for s in u.get("dateien", [])})
+        kontext_kit = self._kontext_kit(saetze)
+        schluessel = sorted({s for u in saetze for s in u.get("dateien", [])} | kontext_kit)
         git_fehler = None
         if wurzel is None:
             im_commit = [s for s in schluessel if s != ABLEITUNG]
         else:
             try:
-                im_commit = self._im_commit_gemerkt(schluessel, wurzel)
+                im_commit = self._im_commit_gemerkt(schluessel, wurzel, kontext_kit)
             except ablage_modul.GitFehler as fehler:
                 im_commit, git_fehler = [], git_antwortet_nicht(str(fehler))
         return {"saetze": [str(u.get("titel", "")) for u in saetze],
@@ -714,16 +736,17 @@ class Werkstatt:
                 "nicht_im_commit": sorted(anzeige(s, self.ableitung_pfad) for s in schluessel if s not in im_commit),
                 **({"git_fehler": git_fehler} if git_fehler else {})}
 
-    def _im_commit_gemerkt(self, schluessel: list[str], wurzel: Path) -> list[str]:
+    def _im_commit_gemerkt(self, schluessel: list[str], wurzel: Path, kontext_kit: set[str] | None = None) -> list[str]:
         """_zu_speichern für den Status, der bei jedem Ereignis kommt: ohne git, solange sich weder die Dateien noch
         Index und HEAD geändert haben, höchstens ZU_SPEICHERN_GILT_S. Speichern selbst fragt git immer."""
         if not schluessel:
             return []
         git_ordner = self._git_ordner(wurzel)
         dateien = []
+        kontext_kit = kontext_kit or set()
         for s in schluessel:
             try:
-                dateien.append(self._eintrag(str(self.ablage.pfad(s))))
+                dateien.append(self._eintrag(str(self._pfad_von(s, kontext_kit))))
             except PfadFehler:
                 dateien.append((s, None, None))
         stand = (wurzel, tuple(schluessel), tuple(s in self.geschrieben for s in schluessel), tuple(dateien),
@@ -731,7 +754,7 @@ class Werkstatt:
         gemerkt = self._zu_speichern_gemerkt
         if gemerkt is not None and gemerkt[0] == stand and time.monotonic() - gemerkt[1] < ZU_SPEICHERN_GILT_S:
             return list(gemerkt[2])
-        im_commit = [s for s, _ in self._zu_speichern(schluessel, wurzel)]
+        im_commit = [s for s, _ in self._zu_speichern(schluessel, wurzel, kontext_kit)]
         self._zu_speichern_gemerkt = (stand, time.monotonic(), tuple(im_commit))
         return im_commit
 
@@ -822,6 +845,20 @@ class Werkstatt:
         self._agenten_memory = (signatur, dict(werte_je), list(nicht_lesbar))
         return werte_je, nicht_lesbar
 
+    def leitplanken(self) -> dict:
+        """GET /api/leitplanken (WS-L7)."""
+        bauplan = self.bauplan()
+        with self.sperre:
+            return leitplanken_modul.uebersicht(self.ordner, self.kit, bauplan, self.schreibbar)
+
+    def leitplanken_skript(self, pfad: object) -> dict:
+        """GET /api/leitplanken/skript (WS-L7)."""
+        with self.sperre:
+            try:
+                return leitplanken_modul.lies_skript(self.kit, self.ordner, pfad)
+            except leitplanken_modul.LeitplankenFehler as fehler:
+                raise WerkstattFehler(fehler.status, {"fehler": fehler.text})
+
     def gliederung(self, text: object) -> dict:
         """POST /api/gliederung (WS-PT9): die Gliederung eines Texts, wie sie GET /api/agent liefert. Nur lesen, nichts
         im Kit; das Formular vergleicht damit, ob seine Teile beim nächsten Lesen dieselben bleiben."""
@@ -838,6 +875,13 @@ class Werkstatt:
         self._pruefe_form(satz)
         try:
             return self.vorschlaege.lege_vor(satz, herkunft, pipeline=pipeline)
+        except VorschlagFehler as fehler:
+            raise WerkstattFehler(fehler.status, {"fehler": fehler.text})
+
+    def lege_vor_kontext(self, satz: dict, ziele: dict[str, ks.KontextZiel]) -> str:
+        self._pruefe_form(satz, kontext_erlaubt=True)
+        try:
+            return self.vorschlaege.lege_vor(satz, HAND, kontext=ziele)
         except VorschlagFehler as fehler:
             raise WerkstattFehler(fehler.status, {"fehler": fehler.text})
 
@@ -860,20 +904,20 @@ class Werkstatt:
 
     # ------------------------------------------------------------ Vorschau
 
-    @staticmethod
-    def _pruefe_form(satz: object, gedaechtnis_erlaubt: bool = False) -> dict:
+    def _pruefe_form(self, satz: object, gedaechtnis_erlaubt: bool = False, kontext_erlaubt: bool = False) -> dict:
         try:
-            return aenderungssatz.pruefe(satz, gedaechtnis_erlaubt)
+            return aenderungssatz.pruefe(satz, gedaechtnis_erlaubt, kontext_erlaubt, self.ordner.hook_ordner)
         except aenderungssatz.SatzFehler as fehler:
             raise WerkstattFehler(400, {"fehler": "Der Änderungssatz ist ungültig.", "meldungen": fehler.meldungen})
 
     def _satz_und_auswahl(self, satz: object, auswahl: object, satz_id: object,
-                          gedaechtnis_erlaubt: bool = False) -> tuple[dict, set[str]]:
+                          gedaechtnis_erlaubt: bool = False, kontext_erlaubt: bool = False) -> tuple[dict, set[str]]:
         if satz_id is not None:
             vorschlag = self._vorschlag(satz_id)
             satz = vorschlag["satz"]
             gedaechtnis_erlaubt = bool(vorschlag.get("gedaechtnis"))
-        self._pruefe_form(satz, gedaechtnis_erlaubt)
+            kontext_erlaubt = bool(vorschlag.get("kontext"))
+        self._pruefe_form(satz, gedaechtnis_erlaubt, kontext_erlaubt)
         ids = [e["id"] for e in satz["eintraege"]]
         if auswahl is None:
             return satz, set(ids)
@@ -935,6 +979,8 @@ class Werkstatt:
                 ergebnis.fehler.append({"eintrag": e["id"], "text": text})
                 continue
             info["dateien"] = [anzeige(s, self.ableitung_pfad) for s in schreiber_.zuletzt_geaendert]
+        for eid, skript in schreiber_.hook_skripte_aufraeumen():
+            next(i for i in ergebnis.eintraege if i["id"] == eid)["dateien"].append(anzeige(skript, self.ableitung_pfad))
         ergebnis.rueck_dateien = {neu: alt for alt, neu in schreiber_.buch.umbenannt.items()}
         ergebnis.rueck_namen = {neu: wer[1] for neu, wer in schreiber_.buch.wer_heisst.items()
                                 if wer[0] == "kit" and wer[1] != neu}
@@ -945,6 +991,9 @@ class Werkstatt:
             ergebnis.fehler.append({"eintrag": ergebnis.letzter, "text": nicht_nachpruefbar(str(fehler))})
         self._gruppen(ergebnis, satz, gewaehlt)
         ergebnis.rechte = self._rechte(satz, gewaehlt, kit)
+        ergebnis.leitplanken, ergebnis.skripte, nicht_gezeigt = leitplanken_modul.vorschau_teile(satz, gewaehlt, kit)
+        gescheitert = {f["eintrag"] for f in ergebnis.fehler}
+        ergebnis.fehler += [f for f in nicht_gezeigt if f["eintrag"] not in gescheitert]
         ergebnis.aenderungen = kit.aenderungen()
         ergebnis.gelesen = dict(kit.gelesen)
         return ergebnis, kit
@@ -1050,6 +1099,9 @@ class Werkstatt:
         return self._warnungen_ohne_verweise(berechnung) + verweise
 
     def _warnungen_ohne_verweise(self, berechnung: _Berechnung) -> list[dict]:
+        return berechnung.leitplanken + self._warnungen_ohne_leitplanken(berechnung)
+
+    def _warnungen_ohne_leitplanken(self, berechnung: _Berechnung) -> list[dict]:
         wurzel = self.git_wurzel()
         if wurzel is None:
             return list(berechnung.nennungen) + berechnung.rechte
@@ -1072,6 +1124,8 @@ class Werkstatt:
         vorher, Probe-Kopie und Einlesen laufen ohne sie, die Seite wartet währenddessen nicht. Der Bauplan danach
         bleibt je (Änderungen, Signatur, Commit) gemerkt, auch für Übernehmen und aus der Prüfung eines Satzes der KI."""
         satz, gewaehlt = self._satz_und_auswahl(satz, auswahl, satz_id)
+        if kontext_modul.ist_kontext_satz(satz):
+            return self._vorschau_kontext(satz, satz_id, mit_bauplan)
         if bereinigen.ist_gedaechtnis_satz(satz):
             return self._vorschau_gedaechtnis(satz, gewaehlt, mit_bauplan)
         with self.sperre:
@@ -1082,7 +1136,8 @@ class Werkstatt:
                 art = "neu" if alt is None else "geloescht" if neu is None else "geaendert"
                 dateien.append({"pfad": pfad, "art": art, "diff": diff(pfad, alt, neu), "im_kit": schluessel != ABLEITUNG})
             antwort = {"eintraege": berechnung.eintraege, "dateien": dateien, "fehler": berechnung.fehler,
-                       "warnungen": self._warnungen(berechnung), "stand": self._stand(berechnung, satz, gewaehlt)}
+                       "warnungen": self._warnungen(berechnung), "stand": self._stand(berechnung, satz, gewaehlt),
+                       "skripte": berechnung.skripte}
             probe = bool(berechnung.aenderungen) and not berechnung.fehler
             signatur = self.signatur() if probe else None
         nachher = None
@@ -1092,6 +1147,7 @@ class Werkstatt:
                 neue, nachher = self._neue_befunde(berechnung, kit, vorher, signatur)
                 if neue:
                     antwort["fehler"] = self._befund_fehler(satz, gewaehlt, berechnung, neue, vorher, nachher)
+                antwort["fehler"] = antwort["fehler"] + leitplanken_modul.ohne_bewacht(satz, gewaehlt, nachher)
             except (PfadFehler, pfade.KopieFehler) as fehler:
                 raise WerkstattFehler(409, {"fehler": str(fehler)})
         if mit_bauplan:
@@ -1166,7 +1222,89 @@ class Werkstatt:
             return {"ok": True, "titel": satz["titel"], "dateien": [b.anzeigen[s] for s in sorted(b.aenderungen)],
                     "meldung": bereinigen.meldung_bereinigt(b.entfernt)}
 
+    def _kontext_ziel(self, satz_id: object) -> ks.KontextZiel:
+        ziele = self.vorschlaege.kontext_ziele(satz_id)
+        if not ziele or "k1" not in ziele:
+            raise WerkstattFehler(404, {"fehler": "Diesen Vorschlag gibt es nicht (mehr)."})
+        return ziele["k1"]
+
+    def _kontext_berechnet(self, satz: dict, ziel: ks.KontextZiel, lauf_offen: bool) -> kontext_modul.Berechnung:
+        try:
+            return kontext_modul.berechne(satz, ziel, self.verboten, self.kit, lauf_offen)
+        except ks.KontextFehler as fehler:
+            raise WerkstattFehler(fehler.status, {"fehler": fehler.text})
+
+    @staticmethod
+    def _stand_kontext(satz: dict, b: kontext_modul.Berechnung) -> str:
+        teile = ["@kontext", satz, sorted((s, pfade.sha(alt)) for s, (alt, _) in b.aenderungen.items())]
+        return hashlib.sha256(json.dumps(teile, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    def _vorschau_kontext(self, satz: dict, satz_id: object, mit_bauplan: bool) -> dict:
+        ziel = self._kontext_ziel(satz_id)
+        lauf_offen = self.lauf_offen()
+        with self.sperre:
+            b = self._kontext_berechnet(satz, ziel, lauf_offen)
+            antwort = {"eintraege": b.eintraege, "dateien": b.dateien, "fehler": b.fehler, "warnungen": b.warnungen,
+                       "stand": self._stand_kontext(satz, b)}
+        if mit_bauplan:
+            antwort["bauplan_nachher"] = self._bauplan_vorher()
+        return antwort
+
+    def _anwenden_kontext(self, satz: dict, gewaehlt: set[str], stand: object, bestaetigt: bool, satz_id: object,
+                          herkunft: str) -> dict:
+        if not gewaehlt:
+            raise WerkstattFehler(409, {"fehler": NICHTS_GEWAEHLT})
+        ziel = self._kontext_ziel(satz_id)
+        lauf_offen = self.lauf_offen()
+        with self.sperre:
+            b = self._kontext_berechnet(satz, ziel, lauf_offen)
+            if stand != self._stand_kontext(satz, b):
+                raise WerkstattFehler(409, {"fehler": STAND_ALT})
+            if b.warnungen and not bestaetigt:
+                raise WerkstattFehler(409, {"fehler": BESTAETIGEN, "warnungen": b.warnungen})
+            if not b.aenderungen:
+                raise WerkstattFehler(409, {"fehler": NICHTS_GEWAEHLT})
+            self.ablage.kontext_ziele[ziel.id] = ziel
+            eintraege = kontext_modul.ohne_inhalt(satz["eintraege"])
+            try:
+                sicherung = self.ablage.sichere(satz["titel"], herkunft, eintraege, b.aenderungen)
+            except (OSError, PfadFehler, ergebnis_modul.NichtSchreibbar):
+                raise self._nicht_schreibbar()
+            try:
+                verlauf = self._verlauf_kontext(satz, herkunft, sicherung, b)
+            except (OSError, ablage_modul.AblageFehler):
+                self.ablage.entferne_sicherung(sicherung)
+                raise self._nicht_schreibbar()
+            self._schreibe_mit_verlauf(sicherung, {s: neu for s, (_, neu) in b.aenderungen.items()}, verlauf,
+                                       erwartet={s: alt for s, (alt, _) in b.aenderungen.items()})
+            self.geschrieben |= set(b.kontext_kit)
+            if satz_id is not None:
+                self.vorschlaege.entferne(satz_id, {"art": "uebernommen", "gewaehlt": len(eintraege),
+                                                    "von": len(satz["eintraege"])})
+            return {"ok": True, "titel": satz["titel"], "dateien": [b.anzeigen[s] for s in sorted(b.aenderungen)],
+                    "meldung": f"{ziel.datei} geändert."}
+
+    def _verlauf_kontext(self, satz: dict, herkunft: str, sicherung: Path, b: kontext_modul.Berechnung) -> dict:
+        verlauf = self.ablage.verlauf()
+        _, info = self.ablage.info(sicherung.name)
+        eintrag = {"id": sicherung.name, "titel": satz["titel"], "herkunft": herkunft, "zeit": info["zeit"],
+                   "sicherung": sicherung.name, "dateien": sorted(b.aenderungen), "rueckgaengig": False,
+                   "sitzung": self.sitzung}
+        if b.kontext_kit:
+            eintrag["kontext_kit"] = list(b.kontext_kit)
+            verlauf["ungespeichert"].append({"id": sicherung.name, "titel": satz["titel"], "dateien": [],
+                                             "kontext_kit": list(b.kontext_kit), "sitzung": self.sitzung})
+        else:
+            eintrag["kontext"] = [b.anzeigen[s] for s in sorted(b.aenderungen)]
+        verlauf["saetze"].append(eintrag)
+        return verlauf
+
     def _anzeige(self, schluessel: str) -> str:
+        if ks.ist_schluessel(schluessel):
+            try:
+                return self.ablage.kontext_ziel(schluessel).anzeige
+            except PfadFehler:
+                return schluessel
         if gd.ist_schluessel(schluessel):
             try:
                 ziel, datei = self.ablage.ziel(schluessel)
@@ -1358,6 +1496,7 @@ class Werkstatt:
         """Geänderte Dateien; hat sich die Ableitung geändert, auch die SKILL.md jeder Skill, die sie nennt (nach dem
         Namen, wie der Scanner, und nach datei, wenn das ein Text ist)."""
         dateien = {s for s in berechnung.aenderungen if s != ABLEITUNG}
+        dateien |= leitplanken_modul.hook_skripte_betroffen(kit, berechnung.aenderungen)
         if ABLEITUNG in berechnung.aenderungen and isinstance(kit.ableitung, dict):
             skills = kit.skills()
             for name, e in kit.ableitung.get("skills", {}).items():
@@ -1468,15 +1607,19 @@ class Werkstatt:
             self.sperre.release()
         bauplan = self.bauplan(_rest(ende))
         nachher = self._nachher(berechnung, kit, bauplan, signatur, ende)
-        return [], self._neu(bauplan, nachher, berechnung, betroffen), nachher, bauplan
+        ohne_bewacht = leitplanken_modul.ohne_bewacht(satz, {e["id"] for e in satz["eintraege"]}, nachher)
+        return ohne_bewacht, self._neu(bauplan, nachher, berechnung, betroffen), nachher, bauplan
 
     def anwenden(self, satz: object = None, auswahl: object = None, stand: object = None, bestaetigt: bool = False,
                  satz_id: object = None, pipeline: object = None) -> dict:
         vorschlag = self._vorschlag(satz_id) if satz_id is not None else None
         herkunft = vorschlag["herkunft"] if vorschlag is not None else HAND
         satz, gewaehlt = self._satz_und_auswahl(vorschlag["satz"] if vorschlag is not None else satz, auswahl, None,
-                                                bool(vorschlag is not None and vorschlag.get("gedaechtnis")))
+                                                bool(vorschlag is not None and vorschlag.get("gedaechtnis")),
+                                                bool(vorschlag is not None and vorschlag.get("kontext")))
         self._nur_schreibbar()
+        if kontext_modul.ist_kontext_satz(satz):
+            return self._anwenden_kontext(satz, gewaehlt, stand, bestaetigt, satz_id, herkunft)
         if bereinigen.ist_gedaechtnis_satz(satz):
             return self._anwenden_gedaechtnis(satz, gewaehlt, stand, bestaetigt, satz_id, herkunft)
         logs_fuer = self._pipeline(pipeline, vorschlag, satz, gewaehlt)
@@ -1493,11 +1636,14 @@ class Werkstatt:
             if not berechnung.aenderungen:
                 raise WerkstattFehler(409, {"fehler": NICHTS_GEWAEHLT})
             try:
-                neue, _ = self._neue_befunde(berechnung, kit, self._bauplan_vorher(), self.signatur())
+                neue, nachher = self._neue_befunde(berechnung, kit, self._bauplan_vorher(), self.signatur())
             except (PfadFehler, pfade.KopieFehler) as fehler:
                 raise WerkstattFehler(409, {"fehler": str(fehler)})
             if neue:
                 raise WerkstattFehler(422, {"fehler": ZURUECKGENOMMEN, "befunde": neue})
+            ohne_bewacht = leitplanken_modul.ohne_bewacht(satz, gewaehlt, nachher)
+            if ohne_bewacht:
+                raise WerkstattFehler(409, {"fehler": AUSWAHL_FEHLER, "eintraege": ohne_bewacht})
             eintraege = [e for e in satz["eintraege"] if e["id"] in gewaehlt]
             try:
                 sicherung = self.ablage.sichere(satz["titel"], herkunft, eintraege, berechnung.aenderungen)
@@ -1515,7 +1661,8 @@ class Werkstatt:
                                                     "von": len(satz["eintraege"])})
             self._bauplan = None
             antwort = {"ok": True, "titel": satz["titel"],
-                       "dateien": [anzeige(s, self.ableitung_pfad) for s in sorted(berechnung.aenderungen)]}
+                       "dateien": [anzeige(s, self.ableitung_pfad) for s in sorted(berechnung.aenderungen)],
+                       "leitplanken": self._leitplanken_betroffen(berechnung.aenderungen)}
             if logs_fuer is not None:
                 warnung = self._speichere_logs(*logs_fuer, set(kit.skills()))
                 if warnung is not None:
@@ -1540,11 +1687,11 @@ class Werkstatt:
         except (OSError, PfadFehler, ergebnis_modul.NichtSchreibbar):
             self._nimm_zurueck(sicherung, sorted(inhalte),
                                texte.werkstatt_nicht_schreibbar(finden.tilde(self.ergebnis, self.home)),
-                               geschrieben={s: inhalte[s] for s in inhalte if gd.ist_schluessel(s)})
+                               geschrieben={s: inhalte[s] for s in inhalte if ablage_modul.ist_extern(s)})
 
     def _schreibe(self, inhalte: dict[str, bytes | None], modi: dict[str, int | None] | None,
                   wiederherstellen: bool, erwartet: dict[str, bytes | None] | None = None) -> None:
-        if any(gd.ist_schluessel(s) for s in inhalte):
+        if any(ablage_modul.ist_extern(s) for s in inhalte):
             self.ablage.schreibe(inhalte, modi, wiederherstellen, erwartet)
         else:
             self.ablage.schreibe(inhalte)
@@ -1564,13 +1711,13 @@ class Werkstatt:
         offen = []
         geschrieben = geschrieben or {}
         for s in schluessel:
-            if gd.ist_schluessel(s) and s not in geschrieben:
+            if ablage_modul.ist_extern(s) and s not in geschrieben:
                 continue
             try:
                 if info is not None:
                     self._schreibe({s: self.ablage.vorher_aus(sicherung, info, s)},
                                    {s: info["dateien"][s].get("modus")}, True,
-                                   {s: geschrieben[s]} if gd.ist_schluessel(s) else None)
+                                   {s: geschrieben[s]} if ablage_modul.ist_extern(s) else None)
             except (OSError, PfadFehler, ablage_modul.AblageFehler, ergebnis_modul.NichtSchreibbar):
                 pass
             if info is None or pfade.sha(self.ablage.lies(s)) != info["dateien"][s]["vorher"]:
@@ -1598,6 +1745,10 @@ class Werkstatt:
             verlauf["eigene"][schluessel] = pfade.sha(neu)
         return verlauf
 
+    def _leitplanken_betroffen(self, schluessel) -> bool:
+        """WS-L12: Hat der Satz die Hook-Datei oder ein Hook-Skript geändert?"""
+        return any(s == self.ordner.hooks or pfade.ist_hook_skript(s, self.ordner.hook_ordner) for s in schluessel)
+
     # ------------------------------------------------------------ Rückgängig
 
     def rueckgaengig(self, bestaetigt: bool = False, satz_id: object = None) -> dict:
@@ -1615,11 +1766,14 @@ class Werkstatt:
                 sicherung, info = self.ablage.info(eintrag["sicherung"])
             except ablage_modul.AblageFehler as fehler:
                 raise WerkstattFehler(409, {"fehler": f"„{eintrag['titel']}“ lässt sich nicht rückgängig machen: {fehler}"})
-            gedaechtnis = [s for s in info["dateien"] if gd.ist_schluessel(s)]
+            gedaechtnis = [s for s in info["dateien"] if ablage_modul.ist_extern(s)]
             for s in gedaechtnis:
                 try:
-                    gd.pruefe(*self.ablage.ziel(s), self.verboten, wiederherstellen=True)
-                except gd.GedaechtnisFehler as fehler:
+                    if ks.ist_schluessel(s):
+                        ks.pruefe(self.ablage.kontext_ziel(s), self.verboten, wiederherstellen=True)
+                    else:
+                        gd.pruefe(*self.ablage.ziel(s), self.verboten, wiederherstellen=True)
+                except (gd.GedaechtnisFehler, ks.KontextFehler) as fehler:
                     raise WerkstattFehler(fehler.status, {"fehler": fehler.text})
                 except PfadFehler as fehler:
                     raise WerkstattFehler(409, {"fehler": str(fehler)})
@@ -1637,11 +1791,13 @@ class Werkstatt:
             eintrag["rueckgaengig"] = True
             ungespeichert = verlauf["ungespeichert"]
             kit_dateien = sorted(s for s in info["dateien"] if s not in gedaechtnis)
+            kontext_kit = sorted(self._kontext_kit([eintrag]))
             if any(u.get("id") == eintrag["id"] and u.get("sitzung") == self.sitzung for u in ungespeichert):
                 verlauf["ungespeichert"] = [u for u in ungespeichert if u.get("id") != eintrag["id"]]
-            elif kit_dateien:
+            elif kit_dateien or kontext_kit:
                 ungespeichert.append({"id": f"{eintrag['id']}-zurueck", "titel": f"Rückgängig: {eintrag['titel']}",
-                                      "dateien": kit_dateien, "sitzung": self.sitzung})
+                                      "dateien": kit_dateien, "sitzung": self.sitzung,
+                                      **({"kontext_kit": kontext_kit} if kontext_kit else {})})
             for schluessel in kit_dateien:
                 verlauf["eigene"][schluessel] = info["dateien"][schluessel]["vorher"]
             # Wie beim Anwenden: eine eigene Sicherung des Stands jetzt, damit ein Fehler mittendrin zurückgeht.
@@ -1651,23 +1807,26 @@ class Werkstatt:
             except (OSError, PfadFehler, ergebnis_modul.NichtSchreibbar):
                 raise self._nicht_schreibbar()
             self._schreibe_mit_verlauf(vorher, inhalte, verlauf, {s: d.get("modus") for s, d in info["dateien"].items()},
-                                       True, {s: alt for s, (alt, _) in jetzt.items() if gd.ist_schluessel(s)})
+                                       True, {s: alt for s, (alt, _) in jetzt.items() if ablage_modul.ist_extern(s)})
             self.ablage.entferne_sicherung(vorher)
-            self.geschrieben |= set(kit_dateien)
+            self.geschrieben |= set(kit_dateien) | set(kontext_kit)
             self._bauplan = None
-            return {"ok": True, "titel": eintrag["titel"]}
+            return {"ok": True, "titel": eintrag["titel"], "dateien": [self._anzeige(s) for s in kit_dateien],
+                    "leitplanken": self._leitplanken_betroffen(kit_dateien)}
 
     # ------------------------------------------------------------ Speichern
 
-    def _zu_speichern(self, schluessel: list[str], wurzel: Path) -> list[tuple[str, Path]]:
+    def _zu_speichern(self, schluessel: list[str], wurzel: Path,
+                      kontext_kit: set[str] | None = None) -> list[tuple[str, Path]]:
         """Nur, was diese Sitzung selbst geschrieben hat, im Kit liegt, nicht ignoriert und geändert ist (git je
         Prüfung einmal für alle Pfade)."""
         kandidaten: list[tuple[str, Path]] = []
+        kontext_kit = kontext_kit or set()
         for s in schluessel:
             if s not in self.geschrieben:
                 continue
             try:
-                pfad = self.ablage.pfad(s)
+                pfad = self._pfad_von(s, kontext_kit)
             except PfadFehler:
                 continue
             if pfade.liegt_unter(pfad.parent, self.kit) and pfade.liegt_unter(pfad.parent, wurzel):
@@ -1687,9 +1846,10 @@ class Werkstatt:
                 raise WerkstattFehler(409, {"fehler": KEIN_GIT})
             verlauf = self.ablage.verlauf()
             saetze = self._ungespeichert(verlauf)
-            schluessel = sorted({s for u in saetze for s in u.get("dateien", [])})
+            kontext_kit = self._kontext_kit(saetze)
+            schluessel = sorted({s for u in saetze for s in u.get("dateien", [])} | kontext_kit)
             try:
-                pfade_ = [p for _, p in self._zu_speichern(schluessel, wurzel)]
+                pfade_ = [p for _, p in self._zu_speichern(schluessel, wurzel, kontext_kit)]
             except ablage_modul.GitFehler as fehler:
                 raise WerkstattFehler(409, {"fehler": git_antwortet_nicht(str(fehler))})
             if not pfade_:

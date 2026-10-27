@@ -29,10 +29,14 @@ class Vorschlaege:
         self._ausgang: dict[str, dict] = {}
         self._nummer = 0
         self._sperre = threading.Lock()
+        self._kontext: dict[str, dict] = {}
 
-    def lege_vor(self, satz: dict, herkunft: str, *, gedaechtnis: bool = False, pipeline: dict | None = None) -> str:
+    def lege_vor(self, satz: dict, herkunft: str, *, gedaechtnis: bool = False, pipeline: dict | None = None,
+                 kontext: dict | None = None) -> str:
         with self._sperre:
-            if sum(1 for e in self._liste if e["herkunft"] == herkunft) >= OFFEN_HOECHSTENS:
+            gleiche = [e for e in self._liste if bool(e.get("kontext")) == (kontext is not None)
+                       and (kontext is not None or e["herkunft"] == herkunft)]
+            if len(gleiche) >= OFFEN_HOECHSTENS:
                 raise VorschlagFehler(409, f"Es liegen schon {OFFEN_HOECHSTENS} Vorschläge {HERKUNFT_TEXT.get(herkunft, '')} "
                                            f"vor. Übernimm oder verwirf zuerst einen.".replace("  ", " "))
             self._nummer += 1
@@ -42,6 +46,9 @@ class Vorschlaege:
                 eintrag["gedaechtnis"] = True
             if pipeline is not None:
                 eintrag["pipeline"] = dict(pipeline)
+            if kontext is not None:
+                eintrag["kontext"] = True
+                self._kontext[eintrag["id"]] = dict(kontext)
             self._liste.append(eintrag)
             return eintrag["id"]
 
@@ -63,11 +70,18 @@ class Vorschlaege:
             vorher = len(self._liste)
             self._liste = [e for e in self._liste if e["id"] != vid]
             weg = len(self._liste) != vorher
+            if isinstance(vid, str):
+                self._kontext.pop(vid, None)
             if weg and ausgang is not None and isinstance(vid, str):
                 self._ausgang[vid] = dict(ausgang)
                 while len(self._ausgang) > AUSGANG_HOECHSTENS:
                     del self._ausgang[next(iter(self._ausgang))]
             return weg
+
+    def kontext_ziele(self, vid: object) -> dict | None:
+        with self._sperre:
+            ziele = self._kontext.get(vid) if isinstance(vid, str) else None
+            return dict(ziele) if ziele is not None else None
 
     def ausgang(self, vid: object) -> dict | None:
         with self._sperre:

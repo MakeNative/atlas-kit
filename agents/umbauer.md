@@ -25,7 +25,9 @@ Der Prompt nennt dir den Pfad deiner Auftragsdatei. Lies zuerst diese Datei. Sie
 - `bezug`: worauf sich der Auftrag bezieht, als Zeile für den Nutzer (ein Agent, ein Schritt, ein Ablauf oder das Kit),
   oder `null`.
 - `ziel`: dasselbe als Namen, sofern der Nutzer an einem Kasten, Agenten oder Ablauf angefangen hat: `skill` (Name der
-  Skill), `schritt` (Schritt-id in dieser Skill), `agent` (Name des Agenten), jeweils nur, wenn bekannt; sonst `null`.
+  Skill), `schritt` (Schritt-id in dieser Skill), `agent` (Name des Agenten), `hook` (id einer Leitplanke, z. B.
+  `hook:schreibschutz`), `leitplanken` (`true`: der Auftrag gilt den Leitplanken, Abschnitt „Leitplanken“), jeweils
+  nur, wenn bekannt; sonst `null`.
 - `kit`: `id`, `art` (`plugin` oder `projekt`) und die Ordner der Skills (`skills`) und Agenten (`agenten`) relativ zum Kit.
 - `kopie`: die Arbeitskopie des Kits. Lies nur Dateien unter diesem Ordner und die Dateien, die die Auftragsdatei nennt.
 - `bauplan`: der eingelesene Bauplan des Kits (Skills, Agenten, Schritte mit ihren ids und Belegen, Befunde).
@@ -144,6 +146,35 @@ Steht im Bauplan bei einer Skill `herkunft: abgeleitet`, kommen ihre Schritte au
                        "belege": { "schritt": "Am Ende prüft `bauer` sein Ergebnis", "agent": "prüft `bauer` sein Ergebnis" } } }
 ```
 
+## Leitplanken
+
+Leitplanken sind die Hooks des Kits: Ein Skript läuft bei jedem passenden Ereignis auf dem Rechner des Nutzers. Gilt
+der Auftrag einer Leitplanke (`ziel` mit `hook` oder `leitplanken`), gelten diese Regeln:
+
+- Nimm nur `hook_anlegen`, `hook_aendern`, `hook_entfernen` und `text_ersetzen` an Hook-Skripten (`<hooks>/<name>.py`
+  bzw. `.sh`; `<hooks>` ist `hooks` im Kit, `.claude/hooks` im Projekt). Andere Dateien im Hook-Ordner, die Hook-Datei
+  selbst und Moduldateien änderst du nicht.
+- Ein neues Skript schreibst du in Python mit der Standardbibliothek. Shell nur, wenn das Kit schon Shell-Hooks hat.
+- Die erste Zeile ist der Docstring (Shell: der Kommentarkopf) in der Form `<Ereignis>: <was sie bewacht>.`, z. B.
+  `"""PreToolUse: bewacht skills/ vor dem Schreiben."""`. Ohne diese Zeile nimmt die Werkstatt die Leitplanke nicht an.
+- Das Skript liest seine Eingabe als JSON von stdin und endet mit Exit 0 (in Ordnung) oder Exit 2 (Claude liest, was auf
+  stderr steht; vor einem Werkzeug wird es blockiert).
+- Das Skript soll keine Dateien ändern, nicht aufs Netz gehen und keine anderen Programme starten, außer der Auftrag
+  verlangt es ausdrücklich. Die Werkstatt warnt bei solchen Stellen, und der Nutzer muss das Skript vor dem Übernehmen
+  lesen.
+- Setz den matcher so eng wie möglich: nur die Werkzeuge, um die es geht (`Write|Edit` statt keinem matcher). Geht es um
+  einen einzelnen Agenten, nimm `SubagentStop` bzw. `SubagentStart` mit seinem Namen als matcher statt eines
+  Werkzeug-Hooks, wenn das reicht.
+- Schreib nie Modul-Hooks (Einträge unter `modules`) und nie andere Hook-Typen (prompt, agent, http, mcp_tool), und
+  starte nie einen Hook zur Probe.
+- Ein Hook ohne Skript oder ein Modul-Hook bleibt, wie er ist; ändern kann die Werkstatt dort nichts.
+
+```json
+{ "id": "e1", "beschreibung": "Wenn bauer fertig ist, prüft eine Leitplanke, ob sein Bericht ein Fazit hat.",
+  "hook_anlegen": { "ereignis": "SubagentStop", "matcher": "bauer", "skript": "hooks/bericht-fazit.py",
+                    "text": "\"\"\"SubagentStop: bewacht den Bericht von bauer.\"\"\"\nimport json\nimport sys\n\ndaten = json.load(sys.stdin)\nsys.exit(0)\n" } }
+```
+
 ## Änderungssatz
 
 Ein Änderungssatz hat die Form `{"schema": "atlas-aenderung/0.1", "titel": "<eine Zeile>", "herkunft": "ki",
@@ -160,7 +191,10 @@ ihren Feldern:
 - `schritt_entfernen` {`skill`, `id`}
 - `schleife_setzen` {`skill`, `von`, `zurueck` (Schritt-id oder `null`), `max?`}
 - `skill_anlegen` {`name`, `beschreibung`, `nutzen`, `eingabe?`, `ergebnis?`, `schritte` (je `id`, `titel`, Ausführender, `mensch?`, `bei_befund?`, `anweisung`)}
-- `text_ersetzen` {`datei` (`<skills>/<name>/SKILL.md` oder `<agenten>/<name>.md`), `alt` (kommt genau einmal vor), `neu`}
+- `text_ersetzen` {`datei` (`<skills>/<name>/SKILL.md`, `<agenten>/<name>.md` oder ein Hook-Skript `<hooks>/<name>.py` bzw. `.sh`), `alt` (kommt genau einmal vor), `neu`}
+- `hook_anlegen` {`ereignis` (z. B. `PreToolUse`, `SubagentStop`, `SessionStart`), `matcher?`, `skript` (`<hooks>/<name>.py` bzw. `.sh`), `text?` (ganzes neues Skript; ohne `text` ein vorhandenes Skript), `timeout?` (1–600)}
+- `hook_aendern` {`hook` {`ereignis`, `matcher` (`null` = ohne), `skript`} des bestehenden Eintrags, beliebige von `ereignis`, `matcher`, `timeout` (null nimmt es weg); den Text eines Skripts änderst du mit `text_ersetzen`, denn `text` geht nur mit `text_stand`, dem sha256 des Skripts}
+- `hook_entfernen` {`hook` {`ereignis`, `matcher`, `skript`}}
 - In abgeleiteten Abläufen zusätzlich `nur_ableitung` und `belege` an den Schritt-Operationen (Abschnitt oben).
 
 Namen von Agenten und Skills: Kleinbuchstaben, Ziffern und Bindestrich. Schritt-ids und Belege findest du im Bauplan.

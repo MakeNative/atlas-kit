@@ -65,6 +65,8 @@ import werkstatt_auswerten  # noqa: E402
 import werkstatt_einstellungen  # noqa: E402
 import werkstatt_kern  # noqa: E402
 import werkstatt_ki  # noqa: E402
+import werkstatt_kontext  # noqa: E402
+import werkstatt_kontext_schutz  # noqa: E402
 import werkstatt_laeufe  # noqa: E402
 from werkstatt_auftraege import AUSWERTEN, AuftragFehler  # noqa: E402
 
@@ -83,6 +85,7 @@ SITZUNG_FRIST_S = 30.0
 LAUF_STILL_S = 120.0
 LAUF_RUHE_S = 30 * 60.0
 LAEUFE = "/api/laeufe"
+KONTEXT = "/api/kontext"
 WARTE_VORGABE_S = 20.0
 WARTE_HOECHSTENS_S = 25.0
 LINK_VERBRAUCHT = "Dieser Link wurde schon verwendet. Öffne die Werkstatt neu mit /atlas:werkstatt oeffnen."
@@ -174,6 +177,7 @@ class Server(ThreadingHTTPServer):
         self.verbunden_gemeldet = False
         self.laeufe: werkstatt_laeufe.Laeufe | None = None
         self.auswerten: werkstatt_auswerten.Auswerten | None = None
+        self.kontext: werkstatt_kontext.Kontext | None = None
 
     # ------------------------------------------------------------ Sitzung verbunden (WS-K10)
 
@@ -480,7 +484,7 @@ class Anfrage(BaseHTTPRequestHandler):
         vorbereitet = self._vorbereiten(post=False)
         if vorbereitet is None:
             return
-        pfad, _ = vorbereitet
+        pfad, rolle = vorbereitet
         w = self.server.werkstatt
         try:
             if pfad == "/":
@@ -492,7 +496,10 @@ class Anfrage(BaseHTTPRequestHandler):
             elif pfad == "/api/bauplan":
                 self._json(200, w.bauplan())
             elif pfad == "/api/saetze":
-                self._json(200, {"saetze": self.server.ki.mit_lauf(w.vorschlaege.liste())})
+                saetze = w.vorschlaege.liste()
+                if rolle != SEITE:
+                    saetze = werkstatt_kontext.fuer_sitzung(saetze)
+                self._json(200, {"saetze": self.server.ki.mit_lauf(saetze)})
             elif pfad == "/api/auftraege":
                 self._json(200, {"auftraege": self.server.ki.fuer_seite(),
                                  "sitzung": {"verbunden": self.server.sitzung_verbunden()}})
@@ -501,10 +508,19 @@ class Anfrage(BaseHTTPRequestHandler):
             elif pfad == "/api/agent":
                 namen = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get("name", [])
                 self._json(200, w.agent(namen[0] if len(namen) == 1 else None))
+            elif pfad == "/api/leitplanken":
+                self._json(200, w.leitplanken())
+            elif pfad == "/api/leitplanken/skript":
+                werte = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get("pfad", [])
+                self._json(200, w.leitplanken_skript(werte[0] if len(werte) == 1 else None))
             elif pfad == "/api/ereignisse":
                 self._ereignisse()
             elif pfad == "/api/pipelines":
                 self._json(200, self.server.auswerten.pipelines())
+            elif pfad == KONTEXT:
+                self._json(200, self.server.kontext.liste(self._einzeln("skill"), self._einzeln("ort")))
+            elif pfad == KONTEXT + "/datei":
+                self._json(200, self.server.kontext.datei(self._einzeln("id")))
             elif pfad == LAEUFE:
                 self._json(200, self.server.laeufe.liste())
             elif pfad.startswith(LAEUFE + "/"):
@@ -515,9 +531,17 @@ class Anfrage(BaseHTTPRequestHandler):
             self._json(fehler.status, fehler.daten)
         except werkstatt_laeufe.LaufFehler as fehler:
             self._json(fehler.status, fehler.daten)
+        except werkstatt_kontext_schutz.KontextFehler as fehler:
+            self._json(fehler.status, {"fehler": fehler.text})
         except Exception:  # noqa: BLE001
             traceback.print_exc()
             self._fehler(500, "Interner Fehler in der Werkstatt.")
+
+    def _einzeln(self, name: str) -> object:
+        werte = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get(name)
+        if werte is None:
+            return None
+        return werte[0] if len(werte) == 1 else werte
 
     def do_POST(self) -> None:  # noqa: N802
         vorbereitet = self._vorbereiten(post=True)
@@ -544,6 +568,7 @@ class Anfrage(BaseHTTPRequestHandler):
             "/api/auftraege/zustand": self._auftrag_zustand,
             "/api/auftraege/nachricht": self._auftrag_nachricht,
             "/api/auftraege/uebernehmen": self._auftrag_uebernehmen,
+            KONTEXT + "/satz": self._kontext_satz,
             LAEUFE: self._lauf_starten,
             LAEUFE + "/abbrechen": self._lauf_abbrechen,
             LAEUFE + "/abschliessen": self._lauf_abschliessen,
@@ -570,6 +595,8 @@ class Anfrage(BaseHTTPRequestHandler):
             self._json(fehler.status, {"fehler": fehler.text, "zustand": fehler.zustand})
         except werkstatt_laeufe.LaufFehler as fehler:
             self._json(fehler.status, fehler.daten)
+        except werkstatt_kontext_schutz.KontextFehler as fehler:
+            self._json(fehler.status, {"fehler": fehler.text})
         except Exception:  # noqa: BLE001
             traceback.print_exc()
             self._fehler(500, "Interner Fehler in der Werkstatt.")
@@ -701,6 +728,11 @@ class Anfrage(BaseHTTPRequestHandler):
                                              daten.get("memory"), daten.get("logs"))
         self.server.sende("satz", {"id": antwort["vorschlag"]})
         self._json(200, {"ok": True, **antwort})
+
+    def _kontext_satz(self, daten: dict, _rolle: str) -> None:
+        antwort = self.server.kontext.satz(daten)
+        self.server.sende("satz", {"id": antwort["vorschlag"]})
+        self._json(200, antwort)
 
     def _lauf_starten(self, daten: dict, _rolle: str) -> None:
         self._json(200, self.server.laeufe.starte(daten))
@@ -846,6 +878,7 @@ def main(argv: list[str]) -> int:
     server.auswerten = werkstatt_auswerten.Auswerten(werkstatt, server.laeufe, einstellungen, werkstatt.register,
                                                      server.sende)
     server.ki.auswerten = server.auswerten
+    server.kontext = werkstatt_kontext.Kontext(werkstatt, server.laeufe, werkstatt_kontext.KontextRegister())
     werkstatt.lauf_offen = server.laeufe.offen_im_kit
     server.auswerten.beim_start()
     signal.signal(signal.SIGTERM, lambda *_: server.beende())

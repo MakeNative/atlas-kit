@@ -1,7 +1,7 @@
 {
   "name": "atlas",
-  "description": "Macht aus einem Claude-Code-Kit oder einem Projekt mit eigenen Skills und Agenten eine Seite, die zeigt, welche Skills und Agenten es hat und wie seine Abläufe laufen. /atlas:init erledigt alles in einem Rutsch: einlesen, Abläufe ableiten, Seite bauen und öffnen. Einzeln liest /atlas:scan ein, leitet /atlas:analyse die Abläufe aus den Beschreibungen ab und baut /atlas:render die Seite als eine Datei. Kit und Projekt werden dabei nur gelesen. In /atlas:werkstatt bearbeitest du Agenten und Abläufe von Hand oder mit KI, lässt eine Pipeline bewerten, legst neue an, startest Läufe, die du live verfolgst und vergleichst, und lässt sie von der KI auswerten; /atlas:neu legt ein neues Kit an und öffnet es gleich dort. Geschrieben wird nur nach deiner Freigabe, mit Sicherung und Rückgängig.",
-  "version": "0.3.0",
+  "description": "Macht aus einem Claude-Code-Kit oder einem Projekt mit eigenen Skills und Agenten eine Seite, die zeigt, welche Skills und Agenten es hat und wie seine Abläufe laufen. /atlas:init erledigt alles in einem Rutsch: einlesen, Abläufe ableiten, Seite bauen und öffnen. Einzeln liest /atlas:scan ein, leitet /atlas:analyse die Abläufe aus den Beschreibungen ab und baut /atlas:render die Seite als eine Datei. Kit und Projekt werden dabei nur gelesen. In /atlas:werkstatt bearbeitest du Agenten und Abläufe von Hand oder mit KI, lässt eine Pipeline bewerten, legst neue an, startest Läufe, die du live verfolgst und vergleichst, und lässt sie von der KI auswerten; unter „Memory und Kontext“ siehst und änderst du Memory, CLAUDE.md und eingebundene Dokumente einer Pipeline; /atlas:neu legt ein neues Kit an und öffnet es gleich dort. Geschrieben wird nur nach deiner Freigabe, mit Sicherung und Rückgängig.",
+  "version": "0.4.0",
   "author": {
     "name": "ceichmueller"
   },

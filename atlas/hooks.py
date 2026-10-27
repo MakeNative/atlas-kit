@@ -1,13 +1,15 @@
 """Hook-Knoten aus hooks/hooks.json (Projekt: .claude/settings.json), bewacht und pfade aus dem
-Docstring bzw. Kommentarkopf, bewacht-Kanten."""
+Docstring bzw. Kommentarkopf, bewacht-Kanten; Modul-Hooks liest hook_module."""
 from __future__ import annotations
 
 import json
 import posixpath
 import re
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
+import hook_module
 from befunde import Befunde
 from docstring import Docstring, erster_absatz, modul_docstring, ohne_schlusspunkt
 from kommentarkopf import kommentarkopf
@@ -19,20 +21,31 @@ WURZEL_IM_COMMAND = {"plugin": "${CLAUDE_PLUGIN_ROOT}/", "projekt": "$CLAUDE_PRO
 ORT = {"plugin": "im Kit", "projekt": "im Projekt"}
 PRAEFIX = re.compile(r"^([A-Za-z]+): ")
 SATZZEICHEN = ",.;:)!?"
-# Hook-Ereignisse von Claude Code; dazu kommen die Schlüssel aus hooks.json.
-EREIGNISSE = {
-    "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "UserPromptSubmit",
-    "Stop", "SubagentStart", "SubagentStop", "PreCompact", "SessionStart", "SessionEnd",
-    "PermissionRequest",
-}
+EREIGNISSE = (
+    "PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "PermissionDenied", "Notification",
+    "UserPromptSubmit", "UserPromptExpansion", "Stop", "StopFailure", "SubagentStart", "SubagentStop",
+    "PreCompact", "PostCompact", "SessionStart", "SessionEnd", "Setup", "TaskCreated", "TaskCompleted",
+    "TeammateIdle", "Elicitation", "ElicitationResult", "ConfigChange", "InstructionsLoaded", "CwdChanged",
+    "FileChanged", "WorktreeCreate", "WorktreeRemove",
+)
+WERKZEUG_EREIGNISSE = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "PermissionDenied")
+AGENT_EREIGNISSE = ("SubagentStart", "SubagentStop")
 
 
 # ---------------------------------------------------------------- hooks.json
 
-def _struktur_ok(daten) -> bool:
-    if not isinstance(daten, dict) or not isinstance(daten.get("hooks"), dict):
+@dataclass
+class GeleseneHookDatei:
+    daten: dict
+    text: str
+    hooks: dict | None
+    module: list[str] | None
+
+
+def hooks_struktur_ok(hooks) -> bool:
+    if not isinstance(hooks, dict):
         return False
-    for gruppen in daten["hooks"].values():
+    for gruppen in hooks.values():
         if not isinstance(gruppen, list):
             return False
         for gruppe in gruppen:
@@ -43,15 +56,23 @@ def _struktur_ok(daten) -> bool:
     return True
 
 
-def _lies_hooks_json(quelle: Ordner, befunde: Befunde) -> dict | None:
-    """SC-H5, SC-M6: fehlt die Datei (im Projekt auch der Schlüssel hooks) -> None ohne Befund;
-    kaputt -> None mit Befund nicht_lesbar."""
+def _falsche_form(befunde: Befunde, datei: str) -> None:
+    befunde.melde("nicht_lesbar",
+                  f"{datei} hat nicht die erwartete Form "
+                  f"{{\"hooks\": {{<Ereignis>: [{{\"hooks\": [...]}}]}}}}; keine Hooks",
+                  datei, None, aussage="hooks")
+
+
+def lies_hook_datei(quelle: Ordner, befunde: Befunde) -> GeleseneHookDatei | None:
+    """SC-H5, SC-M6: fehlt die Datei (im Projekt auch der Schlüssel hooks) -> None ohne Befund; kaputt -> None mit
+    Befund nicht_lesbar. hooks bzw. modules sind None, wenn sie fehlen oder ihre Form nicht stimmt (dann mit Befund)."""
     datei = quelle.hooks
     pfad = quelle.wurzel / datei
     if not pfad.is_file():
         return None
     try:
-        daten = json.loads(pfad.read_text(encoding="utf-8-sig"))
+        text = pfad.read_bytes().decode("utf-8")
+        daten = json.loads(text.removeprefix("\ufeff"))
     except UnicodeDecodeError:
         befunde.melde("nicht_lesbar", f"{datei} ist nicht als UTF-8 lesbar; keine Hooks",
                       datei, None, aussage="datei")
@@ -60,32 +81,53 @@ def _lies_hooks_json(quelle: Ordner, befunde: Befunde) -> dict | None:
         befunde.melde("nicht_lesbar", f"{datei} ist kein gültiges JSON ({e.msg}); keine Hooks",
                       datei, e.lineno, aussage="datei")
         return None
-    if quelle.ist_projekt and isinstance(daten, dict) and "hooks" not in daten:
+    except RecursionError:
+        befunde.melde("nicht_lesbar", f"{datei} ist zu tief verschachtelt; keine Hooks", datei, None, aussage="datei")
         return None
-    if not _struktur_ok(daten):
-        befunde.melde("nicht_lesbar",
-                      f"{datei} hat nicht die erwartete Form "
-                      f"{{\"hooks\": {{<Ereignis>: [{{\"hooks\": [...]}}]}}}}; keine Hooks",
-                      datei, None, aussage="hooks")
-        return None
-    return daten
-
-
-def _skript(command, quelle: Ordner) -> str | None:
-    if not isinstance(command, str):
+    except OSError:
         return None
     if quelle.ist_projekt:
+        if isinstance(daten, dict) and "hooks" not in daten:
+            return None
+        if not isinstance(daten, dict) or not hooks_struktur_ok(daten["hooks"]):
+            _falsche_form(befunde, datei)
+            return None
+        return GeleseneHookDatei(daten, text, daten["hooks"], None)
+    if not isinstance(daten, dict) or ("hooks" not in daten and "modules" not in daten):
+        _falsche_form(befunde, datei)
+        return None
+    hooks = None
+    if "hooks" in daten:
+        if hooks_struktur_ok(daten["hooks"]):
+            hooks = daten["hooks"]
+        else:
+            _falsche_form(befunde, datei)
+    module = None
+    if "modules" in daten:
+        module = hook_module.eintraege(daten)
+        if module is None:
+            befunde.melde("nicht_lesbar",
+                          f"modules in {datei} ist keine Liste von Pfaden; keine Modul-Hooks",
+                          datei, None, aussage="modules")
+    return GeleseneHookDatei(daten, text, hooks, module)
+
+
+def skript_aus_command(command, projekt: bool) -> str | None:
+    """Das Skript, das ein command startet, relativ zur Wurzel (SC-H2); None ohne."""
+    if not isinstance(command, str):
+        return None
+    if projekt:
         m = SKRIPT_IM_PROJEKT.search(command.replace('"', "").replace("'", ""))
     else:
         m = SKRIPT.search(command)
     return posixpath.normpath(m.group(1)) if m else None
 
 
-def _eintraege(daten: dict, quelle: Ordner, befunde: Befunde) -> list[dict]:
+def _eintraege(hooks: dict, quelle: Ordner, befunde: Befunde) -> list[dict]:
     """Je command-Hook ein Eintrag {ereignis, matcher, skript, name} in Dateireihenfolge."""
     datei = quelle.hooks
     eintraege = []
-    for ereignis, gruppen in daten["hooks"].items():
+    for ereignis, gruppen in hooks.items():
         for gruppe in gruppen:
             matcher = gruppe.get("matcher")
             if matcher is not None and not isinstance(matcher, str):
@@ -102,7 +144,7 @@ def _eintraege(daten: dict, quelle: Ordner, befunde: Befunde) -> list[dict]:
                                   ziel=str(h.get("type")))
                     continue
                 command = h.get("command")
-                skript = _skript(command, quelle)
+                skript = skript_aus_command(command, quelle.ist_projekt)
                 if skript is None:
                     befunde.melde("nicht_unterstuetzt",
                                   f"Hook unter {ereignis}: command \"{command}\" nennt kein Skript "
@@ -115,7 +157,7 @@ def _eintraege(daten: dict, quelle: Ordner, befunde: Befunde) -> list[dict]:
     return eintraege
 
 
-def _ids(eintraege: list[dict]) -> list[str]:
+def command_ids(eintraege: list[dict]) -> list[str]:
     """SC-H3: hook:<name>; mehrfach -> @<Ereignis>; mehrfach im selben Ereignis -> -<n>."""
     je_name = Counter(e["name"] for e in eintraege)
     je_ereignis = Counter((e["name"], e["ereignis"]) for e in eintraege)
@@ -216,32 +258,35 @@ def _hook_knoten(quelle: Ordner, e: dict, hook_id: str, ereignisse: set[str], ca
 
 
 def lies_hooks(quelle: Ordner, befunde: Befunde) -> tuple[list[dict], list[dict]]:
-    """Hook-Knoten in Dateireihenfolge und bewacht-Kanten."""
-    daten = _lies_hooks_json(quelle, befunde)
-    if daten is None:
+    """Hook-Knoten in Dateireihenfolge (erst die Command-Hooks, dann die Modul-Hooks) und bewacht-Kanten."""
+    gelesen = lies_hook_datei(quelle, befunde)
+    if gelesen is None:
         return [], []
-    eintraege = _eintraege(daten, quelle, befunde)
-    ereignisse = EREIGNISSE | set(daten["hooks"])
+    eintraege = _eintraege(gelesen.hooks, quelle, befunde) if gelesen.hooks is not None else []
+    ereignisse = set(EREIGNISSE) | set(gelesen.hooks or {})
     cache: dict = {}
     knoten: list[dict] = []
     kanten: list[dict] = []
-    for e, hook_id in zip(eintraege, _ids(eintraege)):
+    for e, hook_id in zip(eintraege, command_ids(eintraege)):
         k, ks = _hook_knoten(quelle, e, hook_id, ereignisse, cache, befunde)
         knoten.append(k)
         kanten.extend(ks)
+    if gelesen.module is not None:
+        knoten += hook_module.modul_knoten(quelle, gelesen.daten, gelesen.text, [k["id"] for k in knoten], befunde)
     return knoten, kanten
 
 
 def skripte(quelle: Ordner) -> list[str]:
-    """Hook-Skripte, die der Scanner liest (im Kit vorhanden), relativ zur Wurzel und sortiert.
+    """Hook-Skripte und Moduldateien, die der Scanner liest (im Kit vorhanden), relativ zur Wurzel und sortiert.
 
     Öffentlich für die Werkstatt: Ihre Probe-Kopie enthält genau das, was der Scanner liest
-    (Ordner.dateien() und diese Skripte). Befunde entstehen hier keine.
+    (Ordner.dateien() und diese Dateien). Befunde entstehen hier keine.
     """
-    befunde = Befunde()
-    daten = _lies_hooks_json(quelle, befunde)
-    if daten is None:
+    gelesen = lies_hook_datei(quelle, Befunde())
+    if gelesen is None:
         return []
-    gefunden = {e["skript"] for e in _eintraege(daten, quelle, befunde)
+    gefunden = {e["skript"] for e in (_eintraege(gelesen.hooks, quelle, Befunde()) if gelesen.hooks is not None else [])
                 if e.get("skript") and _skript_im_kit(quelle.wurzel, e["skript"])}
+    if gelesen.module is not None:
+        gefunden |= set(hook_module.moduldateien(quelle, gelesen.daten))
     return sorted(gefunden)

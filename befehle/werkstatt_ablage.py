@@ -27,6 +27,7 @@ from pathlib import Path
 import ergebnis
 import plattform
 import werkstatt_gedaechtnis as gd
+import werkstatt_kontext_schutz as ks
 import werkstatt_pfade as pfade
 from werkstatt_pfade import ABLEITUNG, PfadFehler
 
@@ -67,6 +68,10 @@ class AblageFehler(Exception):
 
 class GedaechtnisSchreibFehler(PfadFehler):
     pass
+
+
+def ist_extern(schluessel: object) -> bool:
+    return gd.ist_schluessel(schluessel) or ks.ist_schluessel(schluessel)
 
 
 def _jetzt() -> datetime:
@@ -125,13 +130,15 @@ def signiere(geheimnis: bytes, daten: object) -> str:
 
 class Ablage:
     def __init__(self, ergebnis_ordner: Path, kit: Path, ableitung_pfad: Path | None, skills: str, agenten: str,
-                 geheimnis: bytes, sitzung: str | None = None, ableitung_lesen=None):
+                 geheimnis: bytes, sitzung: str | None = None, ableitung_lesen=None,
+                 hooks: tuple[str, str] | None = None):
         self.ergebnis = ergebnis_ordner
         self.ordner = ergebnis_ordner / ORDNER
         self.kit = kit
         self.ableitung_pfad = ableitung_pfad
         self.skills = skills
         self.agenten = agenten
+        self.hooks = hooks
         self.geheimnis = geheimnis
         self.sitzung = sitzung  # Kennung dieses Serverlaufs (Werkstatt.sitzung), für die Kürzung des Verlaufs
         self.ableitung_lesen = ableitung_lesen
@@ -140,13 +147,15 @@ class Ablage:
         self.register: gd.Register | None = None
         self.verboten: gd.Verboten | None = None
         self.ziele: dict[str, gd.Ziel] = {}
+        self.kontext_ziele: dict[str, ks.KontextZiel] = {}
+        self.kontext_nachfolger: dict[tuple, tuple[int, int]] = {}
         self.gedaechtnis_geschrieben: list[str] = []
 
     # ------------------------------------------------------------ Beglaubigung
 
     def gueltiger_schluessel(self, schluessel: object) -> bool:
-        return schluessel == ABLEITUNG or gd.ist_schluessel(schluessel) \
-            or pfade.freigegeben(schluessel, self.skills, self.agenten)
+        return schluessel == ABLEITUNG or gd.ist_schluessel(schluessel) or ks.ist_schluessel(schluessel) \
+            or pfade.freigegeben(schluessel, self.skills, self.agenten, self.hooks)
 
     def ziel(self, schluessel: str) -> tuple[gd.Ziel, str]:
         gid, datei = gd.teile_von(schluessel)
@@ -156,6 +165,12 @@ class Ablage:
         if ziel is None or self.verboten is None:
             raise PfadFehler(gd.ORDNER_UNBEKANNT)
         return ziel, datei
+
+    def kontext_ziel(self, schluessel: str) -> ks.KontextZiel:
+        ziel = self.kontext_ziele.get(ks.kid_von(schluessel)) if ks.ist_schluessel(schluessel) else None
+        if ziel is None or self.verboten is None:
+            raise PfadFehler(ks.UNBEKANNT)
+        return ziel
 
     def _gueltige_dateien(self, dateien: object) -> list[str] | None:
         if not isinstance(dateien, list) or not all(self.gueltiger_schluessel(s) for s in dateien):
@@ -195,10 +210,15 @@ class Ablage:
             if self.ableitung_pfad.is_symlink() or self.ableitung_pfad.parent.is_symlink():
                 raise PfadFehler(f"{self.ableitung_pfad} ist ein Symlink; die Werkstatt schreibt dort nicht.")
             return self.ableitung_pfad
-        pfade.pruefe_freigabe(schluessel, self.skills, self.agenten)
+        pfade.pruefe_freigabe(schluessel, self.skills, self.agenten, self.hooks)
         return pfade.pruefe_ziel(self.kit, schluessel)
 
     def lies(self, schluessel: str) -> bytes | None:
+        if ks.ist_schluessel(schluessel):
+            try:
+                return ks.lies(self.kontext_ziel(schluessel), self.verboten, wiederherstellen=True)
+            except (PfadFehler, ks.KontextFehler, OSError):
+                return None
         if gd.ist_schluessel(schluessel):
             try:
                 ziel, datei = self.ziel(schluessel)
@@ -321,7 +341,19 @@ class Ablage:
                     raise AblageFehler("Die Sicherung ist unbrauchbar.")
             if gd.ist_schluessel(schluessel):
                 self._ziel_aus_sicherung(schluessel, werte)
+            if ks.ist_schluessel(schluessel):
+                self._kontext_aus_sicherung(schluessel, werte)
         return ordner, info
+
+    def _kontext_aus_sicherung(self, schluessel: str, werte: dict) -> None:
+        modus = werte.get("modus")
+        if not (modus is None or isinstance(modus, int) and not isinstance(modus, bool) and 0 <= modus <= 0o7777):
+            raise AblageFehler("Die Sicherung ist unbrauchbar.")
+        try:
+            ziel = ks.aus_sicherung(werte, schluessel, self.geheimnis)
+        except ks.KontextFehler:
+            raise AblageFehler("Die Sicherung ist unbrauchbar.")
+        self.kontext_ziele.setdefault(ziel.id, ziel)
 
     def _ziel_aus_sicherung(self, schluessel: str, werte: dict) -> None:
         gid, datei = gd.teile_von(schluessel)
@@ -353,6 +385,9 @@ class Ablage:
                 dateien[schluessel] = {"vorher": pfade.sha(alt), "nachher": pfade.sha(neu)}
                 if gd.ist_schluessel(schluessel):
                     dateien[schluessel].update(self._gedaechtnis_felder(schluessel))
+                if ks.ist_schluessel(schluessel):
+                    kontext_ziel = self.kontext_ziel(schluessel)
+                    dateien[schluessel].update(ks.sicherungsfelder(kontext_ziel, ks.modus_von(kontext_ziel)))
             info = {"titel": titel, "herkunft": herkunft, "zeit": _jetzt().isoformat(timespec="seconds"),
                     "eintraege": eintraege, "dateien": dateien}
             ergebnis.schreibe_atomar(ziel / INFO, self._beglaubigt(info), modus=0o600)
@@ -395,6 +430,11 @@ class Ablage:
                                            (erwartet or {}).get(schluessel, gd.OHNE_PRUEFUNG))
                 self.gedaechtnis_geschrieben.append(schluessel)
                 continue
+            if ks.ist_schluessel(schluessel):
+                self._schreibe_kontext(schluessel, inhalt, (modi or {}).get(schluessel), wiederherstellen,
+                                       (erwartet or {}).get(schluessel))
+                self.gedaechtnis_geschrieben.append(schluessel)
+                continue
             pfad = self.pfad(schluessel)
             if inhalt is None:
                 try:
@@ -422,9 +462,22 @@ class Ablage:
             raise GedaechtnisSchreibFehler(gd.schreibt_nicht(Path(ziel.ordner), self.verboten,
                                                              "die Datei lässt sich nicht schreiben"))
 
+    def _schreibe_kontext(self, schluessel: str, inhalt: bytes | None, modus: int | None, wiederherstellen: bool,
+                          erwartet: object) -> None:
+        ziel = self.kontext_ziel(schluessel)
+        if inhalt is None or not isinstance(erwartet, bytes):
+            raise GedaechtnisSchreibFehler(ks.schreibt_nicht(ziel.anzeige, "die Werkstatt legt keine Datei an und löscht keine"))
+        try:
+            ks.schreibe(ziel, inhalt, self.verboten, modus, erwartet=erwartet, wiederherstellen=wiederherstellen)
+        except ks.KontextFehler as fehler:
+            raise GedaechtnisSchreibFehler(fehler.text)
+        except OSError:
+            raise GedaechtnisSchreibFehler(ks.schreibt_nicht(ziel.anzeige, "die Datei lässt sich nicht schreiben"))
+        ks.merke_nachfolger(self.kontext_nachfolger, ziel)
+
     def _raeume_leere_ordner(self, ordner: Path) -> None:
-        """Entfernt leer gewordene Ordner unterhalb des Skill- bzw. Agenten-Ordners (z. B. skills/<name>/), nie
-        diese Ordner selbst, .claude oder die Kit-Wurzel."""
+        """Entfernt leer gewordene Ordner unterhalb des Skill- bzw. Agenten-Ordners (z. B. skills/<name>/) und den
+        Hook-Ordner (WS-V2), nie skills/, agents/, .claude oder die Kit-Wurzel."""
         grenzen = [self.kit / self.skills, self.kit / self.agenten]
         while not ordner.is_symlink() and any(pfade.liegt_unter(ordner, g) and not pfade.gleich(ordner, g)
                                               for g in grenzen):
@@ -433,6 +486,11 @@ class Ablage:
             except OSError:
                 return
             ordner = ordner.parent
+        if self.hooks is not None and not ordner.is_symlink() and pfade.gleich(ordner, self.kit / self.hooks[1]):
+            try:
+                ordner.rmdir()
+            except OSError:
+                return
 
     @staticmethod
     def entferne_sicherung(sicherung: Path) -> None:

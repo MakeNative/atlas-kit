@@ -100,13 +100,26 @@ liegt_unter = finden.liegt_unter
 DATEINAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$")
 
 
-def freigegeben(rel: object, skills: str, agenten: str) -> bool:
+HOOK_SKRIPT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}\.(?:py|sh)$")
+
+
+def ist_hook_skript(rel: object, hook_ordner: str) -> bool:
+    """<hook_ordner>/<name>.py bzw. .sh nach WS-F3, nur diese Ebene (WS-X5, Ticket 31)."""
+    if not isinstance(rel, str) or not rel.startswith(hook_ordner + "/"):
+        return False
+    return bool(HOOK_SKRIPT_NAME.fullmatch(rel[len(hook_ordner) + 1:]))
+
+
+def freigegeben(rel: object, skills: str, agenten: str, hooks: tuple[str, str] | None = None) -> bool:
     """Nur was der Schreiber erzeugen kann: <agenten>/<name>.md, <skills>/<name>/SKILL.md (die Dateien, die der
-    Scanner als Agent bzw. Skill liest). Kein Teil beginnt mit '.', außer den Ordnern selbst (.claude im Projekt)."""
+    Scanner als Agent bzw. Skill liest), mit hooks = (Hook-Datei, Hook-Ordner) dazu die Hook-Datei und die Hook-Skripte.
+    Kein Teil beginnt mit '.', außer den Ordnern selbst (.claude im Projekt)."""
     try:
         rel = pruefe_rel(rel)
     except PfadFehler:
         return False
+    if hooks is not None and (rel == hooks[0] or ist_hook_skript(rel, hooks[1])):
+        return True
     if rel.startswith(agenten + "/"):
         rest = rel[len(agenten) + 1:].split("/")
         return len(rest) == 1 and fnmatch.fnmatchcase(rest[0], AGENT_MUSTER) and bool(DATEINAME.fullmatch(rest[0]))
@@ -116,9 +129,11 @@ def freigegeben(rel: object, skills: str, agenten: str) -> bool:
     return False
 
 
-def pruefe_freigabe(rel: object, skills: str, agenten: str) -> str:
-    if not freigegeben(rel, skills, agenten):
-        raise PfadFehler(f"{rel} ist keine Skill- oder Agent-Datei; die Werkstatt schreibt dort nicht.")
+def pruefe_freigabe(rel: object, skills: str, agenten: str, hooks: tuple[str, str] | None = None) -> str:
+    if not freigegeben(rel, skills, agenten, hooks):
+        raise PfadFehler(f"{rel} ist keine Skill-, Agent- oder Hook-Datei; die Werkstatt schreibt dort nicht."
+                         if hooks is not None else
+                         f"{rel} ist keine Skill- oder Agent-Datei; die Werkstatt schreibt dort nicht.")
     return rel
 
 

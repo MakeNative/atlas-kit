@@ -90,17 +90,27 @@ def zweimal_abgelehnt(meldung: str) -> str:
     return f"Die Werkstatt hat die Antwort zweimal nicht angenommen: {meldung}"
 
 
+HOOK_ID = re.compile(r"^hook:\S{1,200}$")
+
+
+def _ziel_wert_gueltig(schluessel: str, wert: object) -> bool:
+    if schluessel == "leitplanken":
+        return wert is True
+    muster = {"skill": NAME, "schritt": SCHRITT_ID, "agent": NAME, "hook": HOOK_ID}[schluessel]
+    return isinstance(wert, str) and bool(muster.fullmatch(wert))
+
+
 def pruefe_ziel(ziel: object) -> dict | None:
-    """WS-M2: fehlt (None) oder {skill?, schritt? (nur mit skill), agent?}, mindestens eins; Namen wie im
-    Änderungssatz (WS-F3), nur die Form."""
+    """WS-M2: fehlt (None) oder {skill?, schritt? (nur mit skill), agent?, hook?, leitplanken? (true)}, mindestens eins;
+    Namen wie im Änderungssatz (WS-F3), nur die Form."""
     if ziel is None:
         return None
-    muster = {"skill": NAME, "schritt": SCHRITT_ID, "agent": NAME}
-    if (not isinstance(ziel, dict) or not ziel or set(ziel) - set(muster)
-            or not all(isinstance(w, str) and muster[k].fullmatch(w) for k, w in ziel.items())
+    felder = ("skill", "schritt", "agent", "hook", "leitplanken")
+    if (not isinstance(ziel, dict) or not ziel or set(ziel) - set(felder)
+            or not all(_ziel_wert_gueltig(k, w) for k, w in ziel.items())
             or ("schritt" in ziel and "skill" not in ziel)):
         raise AuftragFehler(400, ZIEL_UNGUELTIG)
-    return {k: ziel[k] for k in muster if k in ziel}
+    return {k: ziel[k] for k in felder if k in ziel}
 
 
 class AuftragFehler(Exception):
