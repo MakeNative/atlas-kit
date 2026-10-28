@@ -8,29 +8,56 @@ In der Werkstatt (`/atlas:werkstatt`) bearbeitest du deine Pipelines auf derselb
 
 ## Installation
 
+Du brauchst Claude Code und Python 3.9 oder neuer. Die Installation selbst sind zwei Zeilen in Claude Code:
+
 ```
 /plugin marketplace add MakeNative/atlas-kit
 /plugin install atlas@atlas-kit
 ```
 
-Mehr musst du nicht einrichten. Du brauchst Claude Code und Python 3.9 oder neuer. Beim ersten Aufruf richtet atlas-kit sein Hilfsprogramm zum Lesen ein: eine eigene Python-Umgebung mit PyYAML im Datenordner, den Claude Code dem Plugin gibt, nichts ins System-Python. Das dauert etwa eine Minute und braucht einmal Internet, danach nicht mehr. An deinem System ändert es nichts.
+Beim ersten Aufruf richtet atlas-kit sein Hilfsprogramm zum Lesen ein: eine eigene Python-Umgebung mit PyYAML im Datenordner, den Claude Code dem Plugin gibt, nichts ins System-Python. Das dauert etwa eine Minute und braucht einmal Internet, danach nicht mehr. An deinem System ändert es nichts.
 
-atlas-kit ist getestet auf macOS; unter Windows läuft es in einer automatischen Prüfung, von Hand ausprobiert ist es dort noch nicht. Linux sollte gehen, ist aber noch nicht ausprobiert. Für Windows steht unten, was du brauchst.
+atlas-kit ist getestet auf macOS und unter Windows; Linux sollte gehen, ist aber noch nicht ausprobiert. Die beiden Anleitungen unten führen Schritt für Schritt von einem frischen Rechner bis zur ersten Seite.
 
-### Unter Windows
+### Installation unter macOS
 
-Unter Windows läuft atlas-kit in Claude Code für Windows. Die Befehle von atlas-kit laufen dort in Git Bash, der Shell aus Git for Windows; installier Git for Windows also, falls Claude Code es nicht schon verlangt hat. Dazu brauchst du:
+1. Öffne das Programm Terminal (Programme → Dienstprogramme → Terminal).
+2. Prüf Python mit `python3 --version`. Es muss 3.9 oder neuer melden. Kommt stattdessen ein Fenster, das die Entwicklerwerkzeuge installieren will, bestätige es und tipp den Befehl danach noch einmal. Fehlt Python ganz, installier es von https://www.python.org/downloads/ oder mit Homebrew (`brew install python`).
+3. Prüf git mit `git --version`. Die Entwicklerwerkzeuge aus Schritt 2 bringen es mit. Ohne git geht alles außer „Speichern“ in der Werkstatt.
+4. Installier Claude Code, falls es noch fehlt, wie auf https://claude.com/claude-code beschrieben, und melde dich beim ersten Start an.
+5. Wechsle in den Ordner deines Kits oder Projekts, etwa `cd ~/Projekte/mein-kit`, und starte Claude Code mit `claude`.
+6. Gib in Claude Code die zwei Zeilen von oben ein:
+   ```
+   /plugin marketplace add MakeNative/atlas-kit
+   /plugin install atlas@atlas-kit
+   ```
+7. Ruf den ersten Befehl auf, etwa `/atlas:init` für die Seite oder `/atlas:werkstatt` zum Bearbeiten. Claude Code fragt einmal, ob es das Skript von atlas-kit ausführen darf; danach richtet atlas-kit seine Python-Umgebung ein (etwa eine Minute, einmal Internet). Die Seite öffnet sich in deinem Standardbrowser.
 
-- Python 3.9 oder neuer von https://www.python.org/downloads/. Setz beim Installieren das Häkchen „Add python.exe to PATH“. Ohne das Häkchen findet atlas-kit Python über den Starter `py`, den das Installationsprogramm mitbringt.
-- Das „python“ aus dem Microsoft Store, das Windows ohne installiertes Python anbietet, ist nur ein Platzhalter. atlas-kit überspringt ihn und sagt dir, wenn es kein passendes Python findet.
+Auf eine neue Version aktualisierst du mit `/plugin marketplace update atlas-kit` und danach `/reload-plugins` oder einem Neustart von Claude Code.
 
-So richtest du es ein, in PowerShell oder Windows Terminal:
+### Installation unter Windows
 
-1. Prüf Python mit `py --version` oder `python --version`. Es muss 3.9 oder neuer melden. Öffnet sich stattdessen der Microsoft Store oder kommt keine Versionsnummer, fehlt Python noch.
-2. Prüf Git for Windows mit `git --version`.
-3. Wechsle in den Ordner, in dem du arbeitest, und starte Claude Code mit `claude`.
-4. Gib in Claude Code die zwei Zeilen von oben ein: `/plugin marketplace add MakeNative/atlas-kit` und `/plugin install atlas@atlas-kit`.
-5. Ruf den ersten Befehl auf, etwa `/atlas:init` oder `/atlas:werkstatt`. Claude Code fragt, ob es das Skript von atlas-kit ausführen darf; danach richtet atlas-kit seine Python-Umgebung ein (etwa eine Minute, einmal Internet).
+Unter Windows läuft atlas-kit in Claude Code für Windows. Die Befehle von atlas-kit laufen dort in Git Bash, der Shell aus Git for Windows.
+
+1. Installier Git for Windows von https://git-scm.com/download/win, falls Claude Code es nicht schon verlangt hat. Die Voreinstellungen des Installationsprogramms passen.
+2. Installier Python 3.9 oder neuer von https://www.python.org/downloads/. Setz beim Installieren das Häkchen „Add python.exe to PATH“ und wähl am Ende „Disable path length limit“. Ohne das erste Häkchen findet atlas-kit Python über den Starter `py`, den das Installationsprogramm mitbringt.
+3. Öffne Windows Terminal oder PowerShell (Startmenü → „Terminal“) und prüf beides:
+   ```
+   py --version
+   git --version
+   ```
+   Python muss 3.9 oder neuer melden. Öffnet sich stattdessen der Microsoft Store oder kommt keine Versionsnummer, fehlt Python noch: Das „python“ aus dem Microsoft Store ist nur ein Platzhalter, atlas-kit überspringt ihn.
+4. Installier Claude Code, falls es noch fehlt, wie auf https://claude.com/claude-code beschrieben, und melde dich beim ersten Start an.
+5. Wechsle in den Ordner deines Kits oder Projekts, etwa `cd ~\Projekte\mein-kit`, und starte Claude Code mit `claude`.
+6. Gib in Claude Code die zwei Zeilen von oben ein:
+   ```
+   /plugin marketplace add MakeNative/atlas-kit
+   /plugin install atlas@atlas-kit
+   ```
+7. Ruf den ersten Befehl auf, etwa `/atlas:init` oder `/atlas:werkstatt`. Claude Code fragt, ob es das Skript von atlas-kit ausführen darf; danach richtet atlas-kit seine Python-Umgebung ein (etwa eine Minute, einmal Internet). Die Seite öffnet sich in deinem Standardbrowser.
+8. Liegen deine Kits tief, etwa in OneDrive, setz einmal `git config --global core.longpaths true`, damit lange Pfade gehen (siehe Grenzen unten).
+
+Auf eine neue Version aktualisierst du wie unter macOS mit `/plugin marketplace update atlas-kit`.
 
 Was unter Windows anders ist:
 
@@ -46,7 +73,7 @@ Bekannte Grenzen unter Windows:
 - Pfade über 260 Zeichen scheitern, solange Windows sie nicht erlaubt. Die Werkstatt legt im Kit unter `atlas-kit/werkstatt/` weitere Ordnerebenen an; liegt ein Kit tief, etwa in OneDrive, kommt dann „nicht schreibbar“ oder eine Meldung von git. Abhilfe: am Ende der Python-Installation „Disable path length limit“ wählen und `git config --global core.longpaths true` setzen, oder das Kit weiter oben ablegen.
 - Hat ein Editor oder ein laufender Agent eine Memory- oder Kontext-Datei gerade offen, kann Windows sie nicht ersetzen. Die Werkstatt meldet dann, dass die Datei gerade geöffnet ist, und schreibt nichts. Schließ die Datei und übernimm noch einmal.
 - Leitplanken, die die Werkstatt anlegt, starten ein Python-Skript über einen festen Befehl, der `python3`, `python` und `py -3` der Reihe nach probiert (Python 3.9 oder neuer, der Platzhalter des Microsoft Store zählt nicht), ein Shell-Skript mit `sh`. Findet sich in Git Bash kein Python, meldet die Leitplanke „Kein Python 3.9 oder neuer gefunden“.
-- Unter Windows prüft eine automatische Testreihe atlas-kit bei jeder Änderung, von Hand ausprobiert ist es dort noch nicht. Noch offen sind vor allem das Edge-Fenster der Startseite, die Ordnerauswahl, der Startmenü-Eintrag in einem echten Benutzerprofil und PowerShell, die per Firmenrichtlinie eingeschränkt ist.
+- Unter Windows prüft eine automatische Testreihe atlas-kit bei jeder Änderung; dazu kam ein Durchgang auf Windows 11 mit Werkstatt, Ziehen, Memory und Kontext und einer angelegten Leitplanke. Noch offen sind vor allem das Edge-Fenster der Startseite, die Ordnerauswahl, der Startmenü-Eintrag in einem echten Benutzerprofil und PowerShell, die per Firmenrichtlinie eingeschränkt ist.
 
 ## Neu in dieser Version
 
